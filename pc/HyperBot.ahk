@@ -12,6 +12,7 @@
 
 #Include %A_LineFile%\..\lib\Brain.ahk
 #Include %A_LineFile%\..\lib\OCR.ahk
+#Include %A_LineFile%\..\lib\Ai.ahk
 
 Persistent
 SetWorkingDir A_ScriptDir
@@ -45,7 +46,7 @@ global DEFAULTS := Map(
     "waveOnReply", "1", "movesInAuto", "1", "mood", "normal", "enabledMoods", "chill,happy,sleepy,party,curious,silly",
     "moodLines", "1", "moodRotate", "0", "lookAround", "1", "shiftLock", "0", "camKeys", "arrows",
     "stuckOn", "1", "faceTalker", "1", "followName", "", "followSec", "60",
-    "flyExplore", "50", "syncIp", "", "syncCode", "",
+    "flyExplore", "50", "syncIp", "", "syncCode", "", "aiDrive", "0",
     "chatX1", "0.00", "chatY1", "0.04", "chatX2", "0.32", "chatY2", "0.38", "ocrScale", "2"
 )
 global C := Map()
@@ -331,6 +332,8 @@ MoodReplies() {
 }
 
 SmartSay(name, msg) {
+    if CurMood().id = "ai" && AI.ready
+        return AiSay(name, msg)
     r := smart.Reply(name, msg, CurMood().id, CustomQa())
     text := r.text
     if r.topic = "greet" && Random(0, 2) = 0 {
@@ -834,6 +837,8 @@ AutoStep() {
         return SendChat(SafeIntro())
     }
     m := CurMood()
+    if m.id = "ai" && AI.ready && On("aiDrive") && now - AI.lastDrive > 15000 && !AI.pending.Length
+        return AiDrive()
     if m.id = "fly" {
         if !S.flyOn
             FlyStart()
@@ -1017,7 +1022,7 @@ BuildGui() {
     gw.SetFont("s9 norm c808080")
     gw.AddText("x+10 yp+9", "v" VERSION "  -  a friendly bot (always says it's a bot)  -  alt accounts only")
     gw.SetFont("s10 norm c000000")
-    tab := gw.AddTab3("x10 y44 w560 h500", ["Control", "Chat && Brain", "Moods && Camera", "Moves", "Fly Brain", "Sync", "About"])
+    tab := gw.AddTab3("x10 y44 w560 h500", ["Control", "Chat && Brain", "Moods && Camera", "Moves", "Fly Brain", "Sync", "AI local", "About"])
 
     ; --- Control
     tab.UseTab(1)
@@ -1189,8 +1194,33 @@ BuildGui() {
         . "Leave the address empty to broadcast to your whole home network instead. If nothing happens, allow Hyper-Bot in Windows Firewall.")
     gw.SetFont("s10 norm c000000")
 
-    ; --- About
+    ; --- AI local
     tab.UseTab(7)
+    gw.SetFont("s10 bold c" CYAN)
+    gw.AddText("x24 y82", "AI local - Gemma 4 E2B running on this PC (no API key, no cloud)")
+    gw.SetFont("s9 norm c404040")
+    gw.AddText("x24 y+6 w530", "1) Download the model once (~3.5 GB).  2) Start AI.  3) Tick 'AI local' on Moods && Camera and pick it as the mood, "
+        . "then Listen (F9) and/or Auto (F8). Commands, games and 'are you a bot' still use the safe Smart Brain; everything else goes to the AI.")
+    gw.AddText("x24 y+6 w530", "Safety: strict rules for the AI; bad/dating/personal-info messages never reach it; every reply is checked "
+        . "(bad words, links, socials, numbers, dating, claiming to be human) and thrown away if flagged; Roblox's filter and the rate limits still apply.")
+    gw.SetFont("s10 norm c000000")
+    b := gw.AddButton("x24 y+10 w170", "Download model")
+    b.OnEvent("Click", (*) => AiDownload())
+    b := gw.AddButton("x+8 w110", "Start AI")
+    b.OnEvent("Click", (*) => AiStartUi())
+    b := gw.AddButton("x+8 w110", "Stop AI")
+    b.OnEvent("Click", (*) => (AiStop(), Status("AI stopped")))
+    G.aiState := gw.AddText("x24 y+8 w530 c808080", "AI: not started")
+    G.aiDrive := gw.AddCheckBox("x24 y+6 " (On("aiDrive") ? "Checked" : ""), "AI drives the bot in Auto (looks at the screen every ~15 s and picks walk/turn/jump/emote)")
+    G.aiDrive.OnEvent("Click", (*) => (C["aiDrive"] := G.aiDrive.Value ? "1" : "0", SaveCfg()))
+    gw.AddText("x24 y+10", "Test it here (nothing is sent to Roblox):")
+    G.aiTest := gw.AddEdit("x24 y+4 w420", "hi bot what are you doing")
+    b := gw.AddButton("x+8 w100", "Ask")
+    b.OnEvent("Click", (*) => AiTestAsk())
+    G.aiLog := gw.AddEdit("x24 y+8 w530 h120 ReadOnly", "")
+
+    ; --- About
+    tab.UseTab(8)
     gw.AddEdit("x24 y82 w530 h400 ReadOnly",
         "Hyper-Bot PC " VERSION "`r`n`r`n"
         . "How it works: it only presses keys, moves the mouse and reads the screen with Windows' built-in OCR - like a player. "
@@ -1207,7 +1237,7 @@ BuildGui() {
         . "Credits: OCR library by Descolada (MIT licence, lib\OCR_LICENSE.txt). AutoHotkey v2 (GPL v2). Smart Brain shared with Hyper-Bot for Android.")
     tab.UseTab()
 
-    gw.OnEvent("Close", (*) => (FlyStop(), ExitApp()))
+    gw.OnEvent("Close", (*) => (FlyStop(), AiStop(), ExitApp()))
     RefreshFollowNames()
     if !SELFTEST
         gw.Show("w580 h556")
@@ -1592,4 +1622,112 @@ SyncTick() {
     SyncSend(keys)
     if Mod(SYNC.seq, 20) = 0
         G.syncState.Text := "Sending " keys " - " SYNC.sent " packets so far" (RbxActive() ? "" : "  (paused: Roblox isn't the active window)")
+}
+
+; ------------------------------------------------------------------ AI local glue
+
+AiStartUi() {
+    if AiServerExe() = ""
+        return Status("AI: llama-server.exe is missing (use the full Hyper-Bot PC zip)")
+    if !AiHasModel()
+        return Status("AI: download the model first (AI local tab > Download model)")
+    AiStart()
+    Status("AI starting (loading Gemma 4 E2B - can take 10-60 s)...")
+    SetTimer(AiStatusUpdate, 1000)
+}
+
+AiStatusUpdate() {
+    try G.aiState.Text := "AI: " (AI.ready ? "READY (Gemma 4 E2B on 127.0.0.1:" AI.port ")" : AI.pid ? "loading..." : "not started")
+        . "   model: " (AiHasModel() ? "downloaded" : "not downloaded")
+    if !AI.pid
+        SetTimer(AiStatusUpdate, 0)
+}
+
+AiLog(line) {
+    try G.aiLog.Value := FormatTime(, "HH:mm:ss") "  " line "`r`n" SubStr(G.aiLog.Value, 1, 3000)
+}
+
+AiSay(name, msg) {
+    r := smart.Reply(name, msg, "normal", CustomQa())
+    ; commands, games, memory, your own answers and "are you a bot" stay with the safe Smart Brain
+    for t in ["game", "8ball", "coin", "dice", "joke", "memory", "custom", "isbot", "hack", "robux", "games", "cando", "name", "whomade"]
+        if r.topic = t
+            return QueueChat(r.text)
+    if AiHas(msg, AI_BAD) != "" || AiHas(msg, AI_DATING) != "" {
+        AiLog("blocked incoming from " name)
+        return QueueChat("lets keep it friendly :)")
+    }
+    if AiHas(msg, AI_PERSONAL) != "" {
+        AiLog("personal-info question from " name " -> Smart Brain")
+        return QueueChat(r.text)
+    }
+    k := StrLower(name)
+    hist := AI.history.Has(k) ? AI.history[k] : []
+    msgs := [{role: "system", content: AiRules(CurMood().label, C["botName"])}]
+    for h in hist
+        msgs.Push(h)
+    msgs.Push({role: "user", content: name " says: " SubStr(msg, 1, 200)})
+    AiAsk(msgs, AiReplied.Bind(name, msg, r.text))
+}
+
+AiReplied(name, msg, fallback, txt, err) {
+    prob := err != "" ? err : AiOutputProblem(txt)
+    if prob != "" {
+        AiLog("AI reply to " name " blocked (" prob ") -> Smart Brain")
+        return QueueChat(fallback)
+    }
+    QueueChat(txt)
+    AiLog(name ": " msg "  ->  " txt)
+    k := StrLower(name)
+    hist := AI.history.Has(k) ? AI.history[k] : []
+    hist.Push({role: "user", content: name " says: " SubStr(msg, 1, 200)}), hist.Push({role: "assistant", content: txt})
+    while hist.Length > 6
+        hist.RemoveAt(1)
+    AI.history[k] := hist
+}
+
+AiDrive() {
+    AI.lastDrive := NowMs()
+    if !RbxRect(&x, &y, &w, &h)
+        return
+    img := AiShot(x, y, w, h)
+    if img = ""
+        return
+    q := "This is what your Roblox character sees. Pick the ONE best action for a friendly bot hanging out: "
+        . "walk, left, right, back, jump, wave, dance, idle. Answer with just that one word."
+    AiAsk([{role: "system", content: AiRules(CurMood().label, C["botName"])}, {role: "user", content: {text: q, image: img}}], AiDriven, 4)
+}
+
+AiDriven(txt, err) {
+    if err != "" || !S.auto || !RbxActive()
+        return
+    act := ""
+    for a in ["walk", "left", "right", "back", "jump", "wave", "dance", "idle"]
+        if InStr(StrLower(txt), a) {
+            act := a
+            break
+        }
+    switch act {
+        case "walk": Hold("w", Random(700, 1500)), S.lastWalkAt := NowMs()
+        case "left": CamTurn(-1, Random(250, 500))
+        case "right": CamTurn(1, Random(250, 500))
+        case "back": Hold("s", 600)
+        case "jump": Jump()
+        case "wave": QueueChat("/e wave")
+        case "dance": QueueChat("/e dance")
+    }
+    AiLog("AI looked at the screen and chose: " (act != "" ? act : "(nothing usable: " SubStr(txt, 1, 30) ")"))
+}
+
+AiTestAsk() {
+    q := Trim(G.aiTest.Value)
+    if q = ""
+        return
+    if !AI.ready
+        return AiLog("AI isn't ready yet - Download model, then Start AI")
+    if AiInputBlocked(q)
+        return AiLog("TEST: incoming message blocked by the filter (would answer 'lets keep it friendly :)' or use the Smart Brain)")
+    AiLog("TEST you: " q "  (thinking...)")
+    AiAsk([{role: "system", content: AiRules(CurMood().label, C["botName"])}, {role: "user", content: "Tester says: " q}],
+        (txt, err) => AiLog("TEST AI: " (err != "" ? "(" err ")" : txt) "   [filter: " (AiOutputProblem(txt) = "" ? "OK" : "BLOCKED - " AiOutputProblem(txt)) "]"))
 }

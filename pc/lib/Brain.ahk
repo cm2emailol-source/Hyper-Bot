@@ -561,6 +561,9 @@ global MOODS := [
     {id: "silly", label: "Silly", walk: 3, idle: 1, jump: 4, emote: 3, move: 2, look: 2, stick: 1.0, gapMin: 1200, gapMax: 3000, chatScale: 1.0,
         emotes: ["laugh", "dance2", "point"], lines: ["i am a potato bot", "beep boop beep?", "who put me here lol", "i forgot how to walk"],
         replies: ["hi {name} im a potato", "{name}! beep?", "hey {name} lol"]},
+    ; AI local: Gemma 4 E2B on this PC answers chat (and can drive the bot with vision) - see lib\Ai.ahk
+    {id: "ai", label: "AI local", walk: 4, idle: 3, jump: 1, emote: 1, move: 1, look: 2, stick: 1.0, gapMin: 1800, gapMax: 3800, chatScale: 1.5,
+        emotes: ["wave", "point", "cheer"], lines: [], replies: []},
     ; Fly Brain: no scripted behaviour at all - a real fruit fly brain model drives the bot (see fly\fly_server.py)
     {id: "fly", label: "Fly Brain", walk: 0, idle: 1, jump: 0, emote: 0, move: 0, look: 0, stick: 1.0, gapMin: 1500, gapMax: 3000, chatScale: 1.0,
         emotes: [], lines: [], replies: []}

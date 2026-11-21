@@ -103,6 +103,16 @@ jobs:
           Add-Content pc/fly/python/python312._pth "Lib\site-packages"
           pc/fly/python/python.exe pc/fly/fly_server.py --selftest
 
+      - name: llama.cpp for AI local (Windows CPU build, official release)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download --repo ggml-org/llama.cpp --pattern "llama-*-bin-win-cpu-x64.zip" --output llama.zip
+          if (!(Test-Path llama.zip)) { gh release view --repo ggml-org/llama.cpp --json assets --jq ".assets[].name"; exit 1 }
+          Expand-Archive llama.zip -DestinationPath pc/ai/llama
+          Get-ChildItem pc/ai/llama -Recurse -Filter llama-server.exe | Select-Object FullName
+
       - name: Package
         shell: pwsh
         run: |
@@ -120,3 +130,14 @@ jobs:
           tag_name: pc-build-${{ github.run_number }}
           name: Hyper-Bot PC build ${{ github.run_number }}
           files: HyperBot-PC-*.zip
+
+      - name: AI local test with the real model (Gemma 4 E2B, not packaged - users download it once)
+        shell: cmd
+        run: |
+          mkdir pc\ai\models
+          curl.exe -L --fail -s -o pc\ai\models\gemma-4-E2B-it-Q4_0.gguf https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_0.gguf
+          curl.exe -L --fail -s -o pc\ai\models\mmproj-gemma-4-E2B-it-Q8_0.gguf https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/resolve/main/mmproj-gemma-4-E2B-it-Q8_0.gguf
+          dir pc\ai\models
+          ahk\AutoHotkey64.exe /ErrorStdOut pc\tests\test_ai.ahk > ai.txt 2>&1
+          type ai.txt
+          findstr /C:"AI TEST OK" ai.txt
