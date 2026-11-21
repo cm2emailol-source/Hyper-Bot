@@ -27,6 +27,9 @@ jobs:
         with:
           gradle-version: "8.9"
 
+      - name: PC brain data matches the Android brain
+        run: python3 tools/gen_brain_data.py && git diff --ignore-all-space --exit-code pc/lib/BrainData.ahk
+
       - name: Test Smart Brain
         run: gradle testDebugUnitTest -i | grep -E "BRAIN|FAILED|Tests? " || true
 
@@ -47,3 +50,48 @@ jobs:
           tag_name: build-${{ github.run_number }}
           name: Hyper-Bot build ${{ github.run_number }}
           files: HyperBot-build-*.apk
+
+  pc:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get AutoHotkey v2
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://www.autohotkey.com/download/ahk-v2.zip -OutFile ahk.zip
+          Expand-Archive ahk.zip -DestinationPath ahk
+          Get-ChildItem ahk | Select-Object Name
+
+      - name: Brain tests (Windows)
+        shell: cmd
+        run: |
+          ahk\AutoHotkey64.exe /ErrorStdOut pc\tests\test_brain.ahk > test.txt 2>&1
+          type test.txt
+          findstr /C:"ALL TESTS PASSED" test.txt
+
+      - name: Self-test HyperBot.ahk (loads everything, builds the window, exits)
+        shell: cmd
+        run: |
+          ahk\AutoHotkey64.exe /ErrorStdOut pc\HyperBot.ahk --selftest > self.txt 2>&1
+          type self.txt
+          findstr /C:"SELFTEST OK" self.txt
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $d = "dist/HyperBot-PC"
+          New-Item -ItemType Directory $d -Force | Out-Null
+          Copy-Item pc/* $d -Recurse
+          Remove-Item "$d/tests" -Recurse
+          Copy-Item ahk/AutoHotkey64.exe $d
+          $lic = Get-ChildItem ahk -Recurse -Filter "license*" | Select-Object -First 1
+          if ($lic) { Copy-Item $lic.FullName "$d/AutoHotkey_license.txt" }
+          Compress-Archive -Path $d -DestinationPath "HyperBot-PC-${{ github.run_number }}.zip"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: pc-build-${{ github.run_number }}
+          name: Hyper-Bot PC build ${{ github.run_number }}
+          files: HyperBot-PC-*.zip
