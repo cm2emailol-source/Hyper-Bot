@@ -26,6 +26,7 @@ class MainActivity : Activity() {
     private lateinit var movesBox: LinearLayout
     private lateinit var botNameEdit: EditText
     private lateinit var followEdit: EditText
+    private lateinit var qaEdit: EditText
     private lateinit var repliesEdit: EditText
     private lateinit var waveBox: CheckBox
     private lateinit var introEdit: EditText
@@ -138,6 +139,25 @@ class MainActivity : Activity() {
             "nothing is saved or sent. In Roblox: Calibrate, put LOG1 / LOG2 on the corners of the chat messages, then use " +
             "Listen test and Listen: ON in the bubble.", 13f))
 
+        col.addView(label("Smart Brain", 17f, Color.rgb(0, 150, 230)))
+        col.addView(CheckBox(this).apply {
+            text = "Smart Brain: answer questions, remember people this session, chat games"
+            isChecked = prefs.smartOn
+            setOnCheckedChangeListener { _, c -> prefs.smartOn = c }
+        })
+        col.addView(label(
+            "No AI model: a built-in topic database with fuzzy matching (typos and slang are fine). " +
+            "Players say \"bot ...\" or mention its name: bot how are you, bot are you a bot, bot joke, bot games, " +
+            "bot rps / guess / trivia / riddle / 8ball / coin / dice, \"bot my favorite color is blue\" (it remembers until Listen stops). " +
+            "Always says it's a bot. Max 5 answers a minute.", 13f))
+        col.addView(label("Your own answers (one per line: question => answer):", 13f))
+        qaEdit = EditText(this).apply {
+            setText(prefs.customQaText)
+            minLines = 3
+            gravity = android.view.Gravity.TOP
+        }
+        col.addView(qaEdit)
+
         col.addView(label("Moods", 17f, Color.rgb(0, 150, 230)))
         col.addView(label("Tick the moods you want. Pick the current one from the bubble's Mood button (Normal is always there).", 13f))
         for (md in Moods.ALL) {
@@ -230,6 +250,7 @@ class MainActivity : Activity() {
 
     private fun save() {
         prefs.followName = followEdit.text.toString()
+        prefs.customQaText = qaEdit.text.toString()
         prefs.intro = introEdit.text.toString()
         prefs.linesText = linesEdit.text.toString()
         prefs.chatIntervalSec = intervalEdit.text.toString().toIntOrNull() ?: 45

@@ -960,6 +960,7 @@ class BotService : AccessibilityService() {
     // ---------------------------------------------------------------- listening (reply when talked to)
 
     private val brain = ChatBrain()
+    private val smart = SmartBrain()
     private val lh = Handler(Looper.getMainLooper()) // separate timer: stopping Auto doesn't stop Listen
     private var listening = false
     private var listenButton: Button? = null
@@ -986,6 +987,7 @@ class BotService : AccessibilityService() {
     private fun stopListening() {
         listening = false
         chatQueue.clear()
+        smart.clear()
         listenButton?.text = listenLabel()
     }
 
@@ -1391,6 +1393,11 @@ class BotService : AccessibilityService() {
                 queueChat(brain.fill("ok sorry {name}! i'll stop", c.name))
                 break
             }
+            if (prefs.smartOn && smart.inGame(c.name, now) && c.message.trim().split(" ").size <= 3 &&
+                !brain.isIgnored(c, prefs.botName) && !c.message.trim().lowercase().startsWith("bot")) {
+                if (brain.allowTalk(c.name, now)) smartSay(c.name, c.message)
+                break
+            }
             if (prefs.commandsOn) {
                 val cmd = brain.command(c, prefs.botName, now)
                 if (cmd != null) {
@@ -1399,13 +1406,32 @@ class BotService : AccessibilityService() {
                 }
             }
             if (!brain.shouldReply(c, prefs.botName, lastOwnChat, now)) continue
+            faceToward(c.name)
+            if (prefs.smartOn) {
+                smartSay(c.name, c.message)
+                break
+            }
             val replies = moodReplies()
             if (replies.isEmpty()) break
-            faceToward(c.name)
             if (prefs.waveOnReply) queueChat("/e wave")
             queueChat(brain.fill(replies.random(), c.name))
             break // at most one reply per read
         }
+    }
+
+    /** Answers with the Smart Brain (greetings sometimes use your own reply lines). */
+    private fun smartSay(name: String, msg: String) {
+        val r = smart.reply(name, msg, mood().id, prefs.customQa) ?: return
+        var text = r.text
+        if (r.topic == "greet" && prefs.moodLines.not() && prefs.replyLines.isNotEmpty() && Random.nextBoolean()) {
+            text = brain.fill(prefs.replyLines.random(), name)
+        } else if (r.topic == "greet" && Random.nextInt(3) == 0) {
+            val rl = moodReplies()
+            if (rl.isNotEmpty()) text = brain.fill(rl.random(), name)
+        }
+        val e = r.emote ?: if (r.topic == "greet" && prefs.waveOnReply) "wave" else null
+        if (e != null && prefs.emotesOn) queueChat("/e $e")
+        queueChat(text)
     }
 
     private fun moodReplies(): List<String> {
@@ -1419,7 +1445,7 @@ class BotService : AccessibilityService() {
             "help", "commands" -> {
                 val moves = MoveStore.load(this).map { it.name.lowercase() }.take(4)
                 val extra = if (moves.isNotEmpty()) " or a move: " + moves.joinToString(" ") else ""
-                queueChat("bot commands: wave dance cheer laugh point jump walk hi follow stop mood$extra")
+                queueChat("bot commands: wave dance jump walk follow stop mood games joke - or just ask me stuff$extra")
             }
             "follow", "come" -> {
                 if (followTarget == null) {
@@ -1435,6 +1461,10 @@ class BotService : AccessibilityService() {
             "mood" -> if (brain.allowChatAnswer(cmd.from, now)) queueChat("bot mood: " + mood().label.lowercase())
             "hi", "hello", "hey" -> {
                 faceToward(cmd.from)
+                if (prefs.smartOn) {
+                    if (brain.allowTalk(cmd.from, now)) smartSay(cmd.from, "hi")
+                    return
+                }
                 val replies = moodReplies()
                 if (replies.isNotEmpty() && brain.allowChatAnswer(cmd.from, now)) queueChat(brain.fill(replies.random(), cmd.from))
                 else queueChat("/e wave")
@@ -1457,6 +1487,7 @@ class BotService : AccessibilityService() {
                     ?: moves.firstOrNull { want.isNotEmpty() && it.name.lowercase().contains(want) }
                     ?: if (want.isEmpty() || want == "random") moves.randomOrNull() else null
                 if (m != null) whenFree { playMove(m) }
+                else if (prefs.smartOn && brain.allowTalk(cmd.from, now)) smartSay(cmd.from, cmd.arg)
             }
         }
     }

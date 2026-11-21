@@ -98,6 +98,22 @@ class Prefs(ctx: Context) {
         get() = p.getBoolean("shiftButton", false)
         set(v) = p.edit().putBoolean("shiftButton", v).apply()
 
+    /** Smart Brain: topic database, memory for this session and chat mini-games. */
+    var smartOn: Boolean
+        get() = p.getBoolean("smartOn", true)
+        set(v) = p.edit().putBoolean("smartOn", v).apply()
+
+    /** Your own "question => answer" lines for the Smart Brain. */
+    var customQaText: String
+        get() = p.getString("customQa", DEFAULT_QA) ?: DEFAULT_QA
+        set(v) = p.edit().putString("customQa", v).apply()
+
+    val customQa: List<Pair<String, String>>
+        get() = customQaText.split("\n").mapNotNull {
+            val i = it.indexOf("=>")
+            if (i <= 0) null else Pair(it.substring(0, i).trim(), it.substring(i + 2).trim()).takeIf { p -> p.first.isNotEmpty() && p.second.isNotEmpty() }
+        }
+
     var commandsOn: Boolean
         get() = p.getBoolean("commandsOn", true)
         set(v) = p.edit().putBoolean("commandsOn", v).apply()
@@ -146,6 +162,11 @@ class Prefs(ctx: Context) {
             "beep boop hi {name}",
             "{name} hello there",
             "hi {name} i like your avatar"
+        ).joinToString("\n")
+
+        val DEFAULT_QA = listOf(
+            "who is your owner => my owner is a cool person who builds bots",
+            "what is hyper macro => a macro my owner made, im its little bot brother"
         ).joinToString("\n")
 
         val EMOTES = listOf("wave", "point", "cheer", "laugh", "dance", "dance2", "dance3")

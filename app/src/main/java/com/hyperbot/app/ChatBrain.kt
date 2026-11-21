@@ -64,6 +64,9 @@ class ChatBrain {
      * Should the bot reply? Yes if someone mentions it, or greets shortly after the bot spoke.
      * Limits: 12 s between replies, 60 s per person, at most 4 replies a minute.
      */
+    /** Public version of [ignored] (own messages, slash commands). */
+    fun isIgnored(c: ChatLine, botName: String) = ignored(c, botName)
+
     /** True for the bot's own messages, slash commands and anything it should never react to. */
     private fun ignored(c: ChatLine, botName: String): Boolean {
         val msg = norm(c.message)
@@ -95,7 +98,7 @@ class ChatBrain {
 
         val from = norm(c.name)
         if (now - lastCommand < 5_000) return null
-        if (now - (lastCommandFrom[from] ?: 0L) < 15_000) return null
+        if (now - (lastCommandFrom[from] ?: 0L) < 8_000) return null
         while (commandTimes.isNotEmpty() && now - commandTimes.first() > 60_000) commandTimes.removeFirst()
         if (commandTimes.size >= 8) return null
         if ((cmd == "help" || cmd == "commands") && now - lastHelp < 60_000) return null
@@ -121,10 +124,24 @@ class ChatBrain {
         return true
     }
 
+    /** Conversation limits for the Smart Brain: 6 s between answers, 10 s per person, max 5 a minute. */
+    fun allowTalk(name: String, now: Long): Boolean {
+        val n = norm(name)
+        if (now - lastReply < 6_000) return false
+        if (now - (lastReplyTo[n] ?: 0L) < 10_000) return false
+        while (replyTimes.isNotEmpty() && now - replyTimes.first() > 60_000) replyTimes.removeFirst()
+        if (replyTimes.size >= 5) return false
+        lastReply = now
+        lastReplyTo[n] = now
+        replyTimes.addLast(now)
+        return true
+    }
+
     fun shouldReply(c: ChatLine, botName: String, lastOwnChat: Long, now: Long): Boolean {
         if (ignored(c, botName)) return false
         val msg = norm(c.message)
         val name = norm(c.name)
+        if (msg.startsWith("bot ") || msg.startsWith("robot ")) return false // handled as a command
 
         val words = msg.split(Regex("[^a-z0-9]+")).filter { it.isNotEmpty() }
         val mentioned = words.any { it == "bot" || it == "robot" || it == "bots" } ||
@@ -134,9 +151,9 @@ class ChatBrain {
         if (!(mentioned || (greeted && recentlySpoke))) return false
 
         if (now - lastReply < 12_000) return false
-        if (now - (lastReplyTo[name] ?: 0L) < 60_000) return false
+        if (now - (lastReplyTo[name] ?: 0L) < 20_000) return false
         while (replyTimes.isNotEmpty() && now - replyTimes.first() > 60_000) replyTimes.removeFirst()
-        if (replyTimes.size >= 4) return false
+        if (replyTimes.size >= 5) return false
 
         lastReply = now
         lastReplyTo[name] = now
