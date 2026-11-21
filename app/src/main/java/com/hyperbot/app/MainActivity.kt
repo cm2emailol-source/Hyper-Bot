@@ -1,6 +1,7 @@
 package com.hyperbot.app
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
@@ -22,6 +23,7 @@ class MainActivity : Activity() {
     private lateinit var prefs: Prefs
     private lateinit var status: TextView
     private lateinit var chatDiag: TextView
+    private lateinit var movesBox: LinearLayout
     private lateinit var introEdit: EditText
     private lateinit var linesEdit: EditText
     private lateinit var intervalEdit: EditText
@@ -102,6 +104,15 @@ class MainActivity : Activity() {
             13f
         ))
 
+        col.addView(label("Moves (record them in Roblox: bubble > Moves > + Record new move):", 15f, Color.BLACK))
+        col.addView(CheckBox(this).apply {
+            text = "Use my moves in Auto mode"
+            isChecked = prefs.movesInAuto
+            setOnCheckedChangeListener { _, c -> prefs.movesInAuto = c }
+        })
+        movesBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        col.addView(movesBox)
+
         col.addView(label("Last chat test (screenshot this if chat doesn't work):", 15f, Color.BLACK))
         chatDiag = label("", 12f)
         col.addView(chatDiag)
@@ -115,6 +126,7 @@ class MainActivity : Activity() {
         status.text = if (on) "Status: service ON" else "Status: service OFF - do step 1"
         status.setTextColor(if (on) Color.rgb(0, 140, 60) else Color.rgb(200, 40, 40))
         chatDiag.text = prefs.lastChatDiag.ifEmpty { "(none yet - tap the bubble > Chat test in Roblox)" }
+        refreshMoves()
     }
 
     private fun save() {
@@ -128,6 +140,62 @@ class MainActivity : Activity() {
             toast("Intro must contain \"bot\" - using the default intro")
         } else {
             toast("Saved")
+        }
+    }
+
+    /** Lists saved moves with rename and delete. */
+    private fun refreshMoves() {
+        movesBox.removeAllViews()
+        val moves = MoveStore.load(this)
+        if (moves.isEmpty()) {
+            movesBox.addView(TextView(this).apply { text = "No moves yet."; setPadding(0, dp(4), 0, dp(4)) })
+            return
+        }
+        moves.forEachIndexed { i, mv ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            val nameEdit = EditText(this).apply { setText(mv.name); setSingleLine() }
+            row.addView(nameEdit, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            row.addView(Button(this).apply {
+                text = "Rename"
+                isAllCaps = false
+                setOnClickListener {
+                    val all = MoveStore.load(this@MainActivity)
+                    if (i < all.size) {
+                        all[i].name = nameEdit.text.toString().trim().ifEmpty { all[i].name }
+                        MoveStore.save(this@MainActivity, all)
+                        toast("Renamed")
+                        refreshMoves()
+                    }
+                }
+            })
+            row.addView(Button(this).apply {
+                text = "Delete"
+                isAllCaps = false
+                setOnClickListener {
+                    AlertDialog.Builder(this@MainActivity)
+                        .setTitle("Delete ${mv.name}?")
+                        .setMessage("This can't be undone.")
+                        .setPositiveButton("Delete") { _, _ ->
+                            val all = MoveStore.load(this@MainActivity)
+                            if (i < all.size) {
+                                all.removeAt(i)
+                                MoveStore.save(this@MainActivity, all)
+                            }
+                            refreshMoves()
+                        }
+                        .setNegativeButton("Cancel", null)
+                        .show()
+                }
+            })
+            movesBox.addView(row)
+            movesBox.addView(TextView(this).apply {
+                text = "   ${mv.strokes.size} taps/swipes, ${"%.1f".format(mv.durationMs / 1000.0)} s"
+                textSize = 12f
+                setTextColor(Color.GRAY)
+            })
         }
     }
 

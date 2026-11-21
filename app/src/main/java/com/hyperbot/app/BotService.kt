@@ -207,6 +207,7 @@ class BotService : AccessibilityService() {
         addButton(p, "Say a line") { sayRandomLine(force = true) }
         addButton(p, "Say intro") { sendChat(prefs.safeIntro()) }
         addButton(p, "Chat test") { sendChat("Hyper-Bot chat test (I'm a bot)", test = true) }
+        addButton(p, "Moves") { showMovesPanel() }
         addButton(p, if (markers.isEmpty()) "Calibrate" else "Save calibration") { toggleCalibration() }
         addButton(p, "STOP", Color.rgb(200, 40, 40)) { stopAuto(); hidePanel(); toast("Hyper-Bot stopped") }
 
@@ -254,6 +255,10 @@ class BotService : AccessibilityService() {
         diagView?.let { try { wm.removeView(it) } catch (_: Exception) {} }
         diagView = null
         markers.clear()
+        recLayer?.let { try { wm.removeView(it) } catch (_: Exception) {} }
+        recBar?.let { try { wm.removeView(it) } catch (_: Exception) {} }
+        recLayer = null
+        recBar = null
     }
 
     // ---------------------------------------------------------------- calibration
@@ -312,14 +317,219 @@ class BotService : AccessibilityService() {
         tap(x, y)
     }
 
-    /** Pushes the joystick in a random direction for 0.6-1.6 s. */
+    /** Pushes the joystick and sweeps it in a gentle arc, so the character walks a curve (0.8-2.2 s). */
     fun walkRandom() {
         val (cx, cy) = pos("JOY")
-        val angle = Random.nextDouble(0.0, Math.PI * 2)
+        val a1 = Random.nextDouble(0.0, Math.PI * 2)
+        val a2 = a1 + Random.nextDouble(-0.9, 0.9) // up to ~50 degrees of turning
         val r = dp(60).toFloat()
-        val ms = Random.nextLong(600, 1600)
-        stroke(cx, cy, cx + (cos(angle) * r).toFloat(), cy + (sin(angle) * r).toFloat(), ms)
+        val ms = Random.nextLong(800, 2200)
+        val path = Path().apply {
+            moveTo(cx, cy)
+            lineTo(cx + (cos(a1) * r * 0.6).toFloat(), cy + (sin(a1) * r * 0.6).toFloat())
+            quadTo(
+                cx + (cos((a1 + a2) / 2) * r * 1.1).toFloat(), cy + (sin((a1 + a2) / 2) * r * 1.1).toFloat(),
+                cx + (cos(a2) * r).toFloat(), cy + (sin(a2) * r).toFloat()
+            )
+        }
+        dispatchGesture(
+            GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, ms)).build(),
+            null, null
+        )
         busyUntil = System.currentTimeMillis() + ms + 150
+    }
+
+    // ---------------------------------------------------------------- moves: playback
+
+    /** Replays a recorded move. Strokes that overlap in time (e.g. joystick held while tapping jump)
+     *  are sent together as one multi-finger gesture; separate ones are sent at their recorded times. */
+    fun playMove(m: Move) {
+        if (m.strokes.isEmpty()) return
+        val w = screenW()
+        val hh = screenH()
+        val maxStrokes = GestureDescription.getMaxStrokeCount()
+        val maxDur = GestureDescription.getMaxGestureDuration()
+        val groups = mutableListOf<MutableList<Stroke>>()
+        var groupEnd = -1L
+        for (st in m.strokes.sortedBy { it.start }) {
+            if (groups.isEmpty() || st.start > groupEnd) {
+                groups.add(mutableListOf(st))
+                groupEnd = st.end
+            } else {
+                groups.last().add(st)
+                groupEnd = maxOf(groupEnd, st.end)
+            }
+        }
+        for (g in groups) {
+            val g0 = g.first().start
+            h.postDelayed({
+                val b = GestureDescription.Builder()
+                var added = 0
+                for (st in g) {
+                    if (added >= maxStrokes) break
+                    val offset = st.start - g0
+                    if (offset >= maxDur - 50) continue
+                    val path = Path()
+                    st.points.forEachIndexed { i, pt ->
+                        val x = pt.x * w
+                        val y = pt.y * hh
+                        if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                    }
+                    if (st.points.size == 1) path.lineTo(st.points[0].x * w, st.points[0].y * hh)
+                    val dur = maxOf(50L, st.end - st.start).coerceAtMost(maxDur - offset - 1)
+                    b.addStroke(GestureDescription.StrokeDescription(path, offset, dur))
+                    added++
+                }
+                if (added > 0) try { dispatchGesture(b.build(), null, null) } catch (_: Exception) {}
+            }, g0)
+        }
+        busyUntil = System.currentTimeMillis() + m.durationMs + 400
+    }
+
+    // ---------------------------------------------------------------- moves: panel
+
+    private fun showMovesPanel() {
+        hidePanel()
+        val p = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            background = round(DARK, 12, CYAN)
+        }
+        p.addView(TextView(this).apply {
+            text = "Moves"
+            setTextColor(CYAN)
+            textSize = 15f
+            setPadding(dp(4), 0, dp(4), dp(6))
+        })
+        val moves = MoveStore.load(this)
+        if (moves.isEmpty()) {
+            p.addView(TextView(this).apply {
+                text = "No moves yet"
+                setTextColor(Color.LTGRAY)
+                textSize = 12f
+                setPadding(dp(4), 0, dp(4), dp(4))
+            })
+        }
+        for (m in moves.take(8)) addButton(p, "Play: " + m.name) { playMove(m) }
+        if (moves.size > 8) p.addView(TextView(this).apply {
+            text = "(+${moves.size - 8} more, used by Auto)"
+            setTextColor(Color.LTGRAY)
+            textSize = 11f
+        })
+        addButton(p, "+ Record new move", Color.rgb(0, 150, 90)) { startRecording() }
+        addButton(p, "Back", Color.GRAY) { hidePanel(); togglePanel() }
+        val blp = bubbleLp ?: return
+        wm.addView(p, overlayParams(
+            WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT, blp.x + dp(62), blp.y
+        ))
+        panel = p
+    }
+
+    // ---------------------------------------------------------------- moves: recording
+
+    private var recLayer: View? = null
+    private var recBar: View? = null
+    private var recMove: Move? = null
+    private var recStart = -1L
+    private val recActive = mutableMapOf<Int, Stroke>()
+
+    /** Covers the screen with a see-through layer that records your taps/swipes (Roblox doesn't receive them). */
+    @SuppressLint("ClickableViewAccessibility")
+    private fun startRecording() {
+        hidePanel()
+        stopAuto()
+        val move = Move(MoveStore.nextName(MoveStore.load(this)))
+        recMove = move
+        recStart = -1L
+        recActive.clear()
+        val layer = View(this).apply { setBackgroundColor(Color.argb(45, 0, 150, 230)) }
+        layer.setOnTouchListener { _, e -> recordEvent(e); true }
+        wm.addView(layer, overlayParams(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT, 0, 0))
+        recLayer = layer
+
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(10), dp(6), dp(10), dp(6))
+            background = round(DARK, 12, Color.rgb(220, 50, 50))
+        }
+        bar.addView(TextView(this).apply {
+            text = "REC  ${move.name}   "
+            setTextColor(Color.rgb(255, 90, 90))
+            textSize = 14f
+        })
+        val save = Button(this).apply {
+            text = "Stop & save"; isAllCaps = false; textSize = 13f; setTextColor(Color.WHITE)
+            background = round(Color.rgb(0, 150, 90), 8); setPadding(dp(10), dp(4), dp(10), dp(4))
+            setOnClickListener { stopRecording(true) }
+        }
+        val cancel = Button(this).apply {
+            text = "Cancel"; isAllCaps = false; textSize = 13f; setTextColor(Color.WHITE)
+            background = round(Color.GRAY, 8); setPadding(dp(10), dp(4), dp(10), dp(4))
+            setOnClickListener { stopRecording(false) }
+        }
+        bar.addView(save)
+        bar.addView(cancel, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(6) })
+        wm.addView(bar, overlayParams(
+            WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
+            (screenW() / 2 - dp(160)).toInt(), dp(8)
+        ))
+        recBar = bar
+        toast("Recording ${move.name}: do your taps and swipes, then Stop & save")
+    }
+
+    private fun recordEvent(e: MotionEvent) {
+        if (recStart < 0) recStart = e.eventTime
+        val t = e.eventTime - recStart
+        val offX = e.rawX - e.x
+        val offY = e.rawY - e.y
+        fun point(i: Int) = TouchPoint((e.getX(i) + offX) / screenW(), (e.getY(i) + offY) / screenH(), t)
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
+                val i = e.actionIndex
+                recActive[e.getPointerId(i)] = Stroke(mutableListOf(point(i)))
+            }
+            MotionEvent.ACTION_MOVE -> {
+                for (i in 0 until e.pointerCount) {
+                    val st = recActive[e.getPointerId(i)] ?: continue
+                    if (t - st.points.last().t >= 30) st.points.add(point(i))
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> {
+                val i = e.actionIndex
+                val st = recActive.remove(e.getPointerId(i))
+                if (st != null) {
+                    st.points.add(point(i))
+                    recMove?.strokes?.add(st)
+                }
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                for ((_, st) in recActive) recMove?.strokes?.add(st)
+                recActive.clear()
+            }
+        }
+    }
+
+    private fun stopRecording(save: Boolean) {
+        for ((_, st) in recActive) recMove?.strokes?.add(st)
+        recActive.clear()
+        recLayer?.let { try { wm.removeView(it) } catch (_: Exception) {} }
+        recBar?.let { try { wm.removeView(it) } catch (_: Exception) {} }
+        recLayer = null
+        recBar = null
+        val m = recMove
+        recMove = null
+        if (save && m != null) {
+            if (m.strokes.isEmpty()) {
+                toast("Nothing recorded")
+            } else {
+                val all = MoveStore.load(this)
+                all.add(m)
+                MoveStore.save(this, all)
+                toast("Saved ${m.name}: ${m.strokes.size} taps/swipes, ${"%.1f".format(m.durationMs / 1000.0)} s")
+            }
+        }
+        showMovesPanel()
     }
 
     // ---------------------------------------------------------------- chat
@@ -645,10 +855,15 @@ class BotService : AccessibilityService() {
             sayRandomLine()
             return
         }
-        when (Random.nextInt(10)) {
-            in 0..5 -> walkRandom()
-            in 6..8 -> jump()
-            else -> if (prefs.emotesOn) emoteRandom() else jump()
+        when (Random.nextInt(12)) {
+            in 0..4 -> walkRandom()
+            in 5..6 -> busyUntil = now + Random.nextLong(2500, 6000) // idle: just stand around for a bit
+            in 7..8 -> jump()
+            9 -> if (prefs.emotesOn) emoteRandom() else walkRandom()
+            else -> {
+                val moves = if (prefs.movesInAuto) MoveStore.load(this) else mutableListOf()
+                if (moves.isNotEmpty()) playMove(moves.random()) else walkRandom()
+            }
         }
     }
 }
