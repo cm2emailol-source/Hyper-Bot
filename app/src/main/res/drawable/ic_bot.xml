@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Hyper logo (hexagon + chevron) on cyan -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="64dp"
+    android:height="64dp"
+    android:viewportWidth="64"
+    android:viewportHeight="64">
+    <path
+        android:fillColor="#0096E6"
+        android:pathData="M12,0 L52,0 Q64,0 64,12 L64,52 Q64,64 52,64 L12,64 Q0,64 0,52 L0,12 Q0,0 12,0 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M12.00,32.06 L20.94,17.62 L35.04,17.62 L43.63,32.06 L35.04,46.04 L20.71,46.04 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M36.30,15.21 L41.91,15.21 L52.00,32.06 L41.68,48.79 L36.07,48.79 L46.38,32.06 Z" />
+</vector>
