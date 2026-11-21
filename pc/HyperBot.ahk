@@ -1040,7 +1040,7 @@ BuildGui() {
     gw.AddText("x24 y+2 w520", "Limits for follows you start: max " C["followSec"] " s, 10 min cooldown per player, 3 per player per day. "
         . "The bot tells them it's a bot following them; if they say stop it stops and won't follow them for an hour.")
     gw.SetFont("s10 norm c000000")
-    G.status := gw.AddEdit("x24 y+10 w530 h22 ReadOnly -E0x200 Background F2FBFF", "")
+    G.status := gw.AddEdit("x24 y+10 w530 h22 ReadOnly -E0x200 BackgroundF2FBFF", "")
     G.log := gw.AddEdit("x24 y+6 w530 h88 ReadOnly", "Hotkeys: F6 show/hide  F8 Auto  F9 Listen  F10 STOP  F11 record move  Ctrl+F8 follow nearest  Ctrl+F10 stop following`r`n"
         . "The bot only acts while the Roblox window is active - click another window and it pauses.")
 
