@@ -128,7 +128,7 @@ class MainActivity : Activity() {
         })
         col.addView(label(
             "Commands: bot help, bot hi, bot wave / dance / cheer / laugh / point, bot jump, bot walk, " +
-            "bot follow me (follows only that player, max 60 s), bot stop, " +
+            "bot follow me (follows only that player, max 60 s), bot stop, bot mood, " +
             "bot <move name> (plays your saved move). Most are silent actions. Limits: 1 command per 5 s, " +
             "each person every 15 s, 8 per minute.", 13f))
         col.addView(label(
@@ -136,6 +136,46 @@ class MainActivity : Activity() {
             "Max one reply every 12 s, one per person per minute, 4 per minute. Chat is read from the screen in memory only - " +
             "nothing is saved or sent. In Roblox: Calibrate, put LOG1 / LOG2 on the corners of the chat messages, then use " +
             "Listen test and Listen: ON in the bubble.", 13f))
+
+        col.addView(label("Moods", 17f, Color.rgb(0, 150, 230)))
+        col.addView(label("Tick the moods you want. Pick the current one from the bubble's Mood button (Normal is always there).", 13f))
+        for (md in Moods.ALL) {
+            if (md.id == "normal") continue
+            col.addView(CheckBox(this).apply {
+                text = md.label
+                isChecked = md.id in prefs.enabledMoods
+                setOnCheckedChangeListener { _, c ->
+                    prefs.enabledMoods = if (c) prefs.enabledMoods + md.id else prefs.enabledMoods - md.id
+                }
+            })
+        }
+        col.addView(CheckBox(this).apply {
+            text = "Use the mood's own chat lines and replies (mixed with yours)"
+            isChecked = prefs.moodLines
+            setOnCheckedChangeListener { _, c -> prefs.moodLines = c }
+        })
+        col.addView(CheckBox(this).apply {
+            text = "Change mood by itself every ~10 min (only ticked moods)"
+            isChecked = prefs.moodRotate
+            setOnCheckedChangeListener { _, c -> prefs.moodRotate = c }
+        })
+
+        col.addView(label("Camera", 17f, Color.rgb(0, 150, 230)))
+        col.addView(CheckBox(this).apply {
+            text = "Look around in Auto (swipes the camera at CAM)"
+            isChecked = prefs.lookAround
+            setOnCheckedChangeListener { _, c -> prefs.lookAround = c }
+        })
+        col.addView(CheckBox(this).apply {
+            text = "The game has a shift-lock button (bot taps SHIFT when Shift Lock mode toggles)"
+            isChecked = prefs.shiftButton
+            setOnCheckedChangeListener { _, c -> prefs.shiftButton = c }
+        })
+        col.addView(label(
+            "Shift Lock mode (bubble > Shift Lock): Auto walks forward and steers with the camera, so the avatar always " +
+            "faces where it looks, and Look around turns the whole avatar. Calibrate CAM onto an empty spot on the right " +
+            "half (not on buttons or chat). If the game has a shift-lock button, calibrate SHIFT on it and tick the box above; " +
+            "if the bot's ON/OFF ever gets out of sync with the game, tap the game's button once yourself.", 13f))
 
         col.addView(label("Vision lite", 17f, Color.rgb(0, 150, 230)))
         col.addView(CheckBox(this).apply {

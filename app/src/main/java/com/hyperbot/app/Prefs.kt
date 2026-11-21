@@ -56,6 +56,43 @@ class Prefs(ctx: Context) {
     /** Max seconds to follow someone who said "bot follow me". */
     val followSec: Int get() = 60
 
+    // ---- moods (you choose which ones the bot may use)
+
+    /** Mood ids you ticked in the app. Normal is always available. */
+    var enabledMoods: Set<String>
+        get() = p.getStringSet("enabledMoods", null)?.toSet() ?: setOf("chill", "happy", "sleepy", "party", "curious", "silly")
+        set(v) = p.edit().putStringSet("enabledMoods", v).apply()
+
+    var mood: String
+        get() = p.getString("mood", "normal") ?: "normal"
+        set(v) = p.edit().putString("mood", v).apply()
+
+    /** Mix the mood's own chat lines and replies with yours. */
+    var moodLines: Boolean
+        get() = p.getBoolean("moodLines", true)
+        set(v) = p.edit().putBoolean("moodLines", v).apply()
+
+    /** Off by default: the mood only changes when you pick one. */
+    var moodRotate: Boolean
+        get() = p.getBoolean("moodRotate", false)
+        set(v) = p.edit().putBoolean("moodRotate", v).apply()
+
+    // ---- camera
+
+    var lookAround: Boolean
+        get() = p.getBoolean("lookAround", true)
+        set(v) = p.edit().putBoolean("lookAround", v).apply()
+
+    /** Shift Lock mode: the character faces where the camera looks; Auto walks forward and steers with the camera. */
+    var shiftLock: Boolean
+        get() = p.getBoolean("shiftLock", false)
+        set(v) = p.edit().putBoolean("shiftLock", v).apply()
+
+    /** The game has its own shift-lock button (calibrate SHIFT on it); the bot taps it when Shift Lock mode toggles. */
+    var shiftButton: Boolean
+        get() = p.getBoolean("shiftButton", false)
+        set(v) = p.edit().putBoolean("shiftButton", v).apply()
+
     var commandsOn: Boolean
         get() = p.getBoolean("commandsOn", true)
         set(v) = p.edit().putBoolean("commandsOn", v).apply()
@@ -113,6 +150,7 @@ class Prefs(ctx: Context) {
          * calibrate once with the bubble's "Calibrate" button so they match your phone.
          * JOY = joystick centre, JUMP = jump button, CHAT = chat icon, BOX = chat input box, SEND = send button,
          * LOG1 / LOG2 = top-left and bottom-right corners of the chat messages area (for Listen).
+         * CAM = an empty spot on the right half where a swipe turns the camera, SHIFT = the game's shift-lock button (if it has one).
          */
         val POINTS: LinkedHashMap<String, Pair<Float, Float>> = linkedMapOf(
             "JOY" to Pair(0.18f, 0.72f),
@@ -121,7 +159,9 @@ class Prefs(ctx: Context) {
             "BOX" to Pair(0.30f, 0.38f),
             "SEND" to Pair(0.55f, 0.38f),
             "LOG1" to Pair(0.02f, 0.10f),
-            "LOG2" to Pair(0.40f, 0.45f)
+            "LOG2" to Pair(0.40f, 0.45f),
+            "CAM" to Pair(0.62f, 0.35f),
+            "SHIFT" to Pair(0.93f, 0.52f)
         )
     }
 }

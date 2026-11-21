@@ -216,6 +216,9 @@ class BotService : AccessibilityService() {
         addButton(p, "Say a line") { sayRandomLine(force = true) }
         addButton(p, "Say intro") { sendChat(prefs.safeIntro()) }
         addButton(p, "Chat test") { sendChat("Hyper-Bot chat test (I'm a bot)", test = true) }
+        addButton(p, "Mood: " + mood().label) { showMoodPanel() }
+        addButton(p, "Look around") { lookAround() }
+        shiftButtonView = addButton(p, shiftLabel()) { toggleShiftLock() }
         addButton(p, "Moves") { showMovesPanel() }
         listenButton = addButton(p, listenLabel()) { toggleListen() }
         addButton(p, "Listen test") { readChat(true) }
@@ -236,6 +239,128 @@ class BotService : AccessibilityService() {
         panel = null
         autoButton = null
         listenButton = null
+        shiftButtonView = null
+    }
+
+    // ---------------------------------------------------------------- moods
+
+    private var shiftButtonView: Button? = null
+    private var moodSince = System.currentTimeMillis()
+
+    private fun mood(): Mood {
+        val m = Moods.byId(prefs.mood)
+        return if (m.id == "normal" || m.id in prefs.enabledMoods) m else Moods.NORMAL
+    }
+
+    private fun availableMoods(): List<Mood> = Moods.ALL.filter { it.id == "normal" || it.id in prefs.enabledMoods }
+
+    private fun setMood(m: Mood, announce: Boolean) {
+        prefs.mood = m.id
+        moodSince = System.currentTimeMillis()
+        if (announce) toast("Hyper-Bot mood: " + m.label)
+    }
+
+    private fun showMoodPanel() {
+        hidePanel()
+        val p = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            background = round(DARK, 12, CYAN)
+        }
+        p.addView(TextView(this).apply {
+            text = "Mood"
+            setTextColor(CYAN)
+            textSize = 15f
+            setPadding(dp(4), 0, dp(4), dp(6))
+        })
+        val cur = mood().id
+        for (m in availableMoods()) {
+            val sel = m.id == cur
+            addButton(p, (if (sel) "> " else "") + m.label, if (sel) Color.rgb(0, 150, 90) else CYAN) {
+                setMood(m, true)
+                hidePanel()
+                togglePanel()
+            }
+        }
+        if (availableMoods().size == 1) p.addView(TextView(this).apply {
+            text = "Tick moods in the Hyper-Bot app"
+            setTextColor(Color.LTGRAY)
+            textSize = 11f
+        })
+        addButton(p, "Back", Color.GRAY) { hidePanel(); togglePanel() }
+        val blp = bubbleLp ?: return
+        val lp = overlayParams(
+            WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
+            blp.x + dp(62), blp.y
+        )
+        wm.addView(p, lp)
+        panel = p
+    }
+
+    // ---------------------------------------------------------------- camera: look around + Shift Lock mode
+
+    private fun shiftLabel() = if (prefs.shiftLock) "Shift Lock: ON" else "Shift Lock: OFF"
+
+    private fun toggleShiftLock() {
+        prefs.shiftLock = !prefs.shiftLock
+        if (prefs.shiftButton) {
+            val (x, y) = pos("SHIFT")
+            tap(x, y)
+        }
+        shiftButtonView?.text = shiftLabel()
+        toast(if (prefs.shiftLock) "Shift Lock mode ON" else "Shift Lock mode OFF")
+    }
+
+    /** Swipes on an empty part of the screen (CAM) to turn the camera: a glance to one side and partly back.
+     *  In Shift Lock the character turns with the camera, so this becomes a shift-lock look-around. */
+    fun lookAround() {
+        if (System.currentTimeMillis() < busyUntil) return
+        val (cx, cy) = pos("CAM")
+        val w = screenW()
+        val hgt = screenH()
+        val dir = if (Random.nextBoolean()) 1f else -1f
+        val far = dir * w * Random.nextDouble(0.06, 0.22).toFloat()
+        val back = far * Random.nextDouble(0.0, 0.8).toFloat()
+        val dy = hgt * Random.nextDouble(-0.03, 0.03).toFloat()
+        val ms = Random.nextLong(700, 1600)
+        val path = Path().apply {
+            moveTo(cx, cy)
+            lineTo((cx + far).coerceIn(w * 0.45f, w * 0.98f), (cy + dy).coerceIn(hgt * 0.1f, hgt * 0.6f))
+            lineTo((cx + far - back).coerceIn(w * 0.45f, w * 0.98f), cy)
+        }
+        dispatchGesture(
+            GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, ms)).build(),
+            null, null
+        )
+        busyUntil = System.currentTimeMillis() + ms + 150
+    }
+
+    /** Shift Lock walk: hold the joystick forward and (sometimes) steer with the camera at the same time,
+     *  so the character walks a smooth arc while always facing where it looks. */
+    private fun shiftWalk() {
+        val (jx, jy) = pos("JOY")
+        val (cx, cy) = pos("CAM")
+        val w = screenW()
+        val r = dp(60) * mood().stick
+        val ang = -Math.PI / 2 + Random.nextDouble(-0.35, 0.35)
+        val ms = Random.nextLong(900, 2400)
+        val joy = Path().apply {
+            moveTo(jx, jy)
+            lineTo(jx + (cos(ang) * r).toFloat(), jy + (sin(ang) * r).toFloat())
+        }
+        val b = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(joy, 0, ms))
+        if (Random.nextBoolean()) { // turn while walking (half the time walk straight, so stuck detection still works)
+            val dx = (if (Random.nextBoolean()) 1f else -1f) * w * Random.nextDouble(0.05, 0.18).toFloat()
+            val cam = Path().apply {
+                moveTo(cx, cy)
+                lineTo((cx + dx).coerceIn(w * 0.45f, w * 0.98f), cy)
+            }
+            b.addStroke(GestureDescription.StrokeDescription(cam, 100, ms - 100))
+        }
+        dispatchGesture(b.build(), null, null)
+        busyUntil = System.currentTimeMillis() + ms + 150
+        lastWalkAt = System.currentTimeMillis()
+        lastWalkAngle = ang
     }
 
     private fun addButton(parent: LinearLayout, label: String, color: Int = CYAN, onClick: () -> Unit): Button {
@@ -304,7 +429,7 @@ class BotService : AccessibilityService() {
                 wm.addView(v, lp)
                 markers[name] = Pair(v, lp)
             }
-            toast("Drag JOY, JUMP, CHAT, BOX, SEND onto Roblox's buttons, then tap Save calibration")
+            toast("Drag JOY, JUMP, CHAT, BOX, SEND (and SHIFT) onto Roblox's buttons, CAM onto an empty spot, then Save calibration")
         }
         hidePanel()
         togglePanel()
@@ -335,7 +460,7 @@ class BotService : AccessibilityService() {
         val (cx, cy) = pos("JOY")
         val a1 = Random.nextDouble(0.0, Math.PI * 2)
         val a2 = a1 + Random.nextDouble(-0.9, 0.9) // up to ~50 degrees of turning
-        val r = dp(60).toFloat()
+        val r = dp(60) * mood().stick
         val ms = Random.nextLong(800, 2200)
         val path = Path().apply {
             moveTo(cx, cy)
@@ -812,12 +937,13 @@ class BotService : AccessibilityService() {
 
     fun sayRandomLine(force: Boolean = false) {
         val now = System.currentTimeMillis()
-        if (!force && now - lastChat < prefs.chatIntervalSec * 1000L) return
+        if (!force && now - lastChat < (prefs.chatIntervalSec * 1000L * mood().chatScale).toLong()) return
         if (force && now - lastChat < 5000) {
             toast("Hyper-Bot: wait a few seconds between messages")
             return
         }
-        val lines = prefs.lines
+        val ml = if (prefs.moodLines) mood().lines else emptyList()
+        val lines = if (ml.isNotEmpty() && (prefs.lines.isEmpty() || Random.nextBoolean())) ml else prefs.lines
         if (lines.isEmpty()) return
         lastChat = now
         sendChat(lines.random())
@@ -827,7 +953,7 @@ class BotService : AccessibilityService() {
         val now = System.currentTimeMillis()
         if (!force && now - lastEmote < 60_000) return
         lastEmote = now
-        sendChat("/e " + Prefs.EMOTES.random())
+        sendChat("/e " + mood().emotes.ifEmpty { Prefs.EMOTES }.random())
     }
 
     // ---------------------------------------------------------------- listening (reply when talked to)
@@ -1149,7 +1275,7 @@ class BotService : AccessibilityService() {
                 }
             }
             if (!brain.shouldReply(c, prefs.botName, lastOwnChat, now)) continue
-            val replies = prefs.replyLines
+            val replies = moodReplies()
             if (replies.isEmpty()) break
             faceToward(c.name)
             if (prefs.waveOnReply) queueChat("/e wave")
@@ -1158,13 +1284,18 @@ class BotService : AccessibilityService() {
         }
     }
 
+    private fun moodReplies(): List<String> {
+        val mr = if (prefs.moodLines) mood().replies else emptyList()
+        return if (mr.isNotEmpty() && (prefs.replyLines.isEmpty() || Random.nextBoolean())) mr else prefs.replyLines
+    }
+
     /** Commands are mostly silent actions (emotes, jumps, moves); only help/hi type in chat. */
     private fun runCommand(cmd: ChatBrain.Command, now: Long) {
         when (cmd.name) {
             "help", "commands" -> {
                 val moves = MoveStore.load(this).map { it.name.lowercase() }.take(4)
                 val extra = if (moves.isNotEmpty()) " or a move: " + moves.joinToString(" ") else ""
-                queueChat("bot commands: wave dance cheer laugh point jump walk hi follow stop$extra")
+                queueChat("bot commands: wave dance cheer laugh point jump walk hi follow stop mood$extra")
             }
             "follow", "come" -> {
                 if (followTarget == null) {
@@ -1173,9 +1304,10 @@ class BotService : AccessibilityService() {
                 }
             }
             "stop" -> stopFollow()
+            "mood" -> if (brain.allowChatAnswer(cmd.from, now)) queueChat("bot mood: " + mood().label.lowercase())
             "hi", "hello", "hey" -> {
                 faceToward(cmd.from)
-                val replies = prefs.replyLines
+                val replies = moodReplies()
                 if (replies.isNotEmpty() && brain.allowChatAnswer(cmd.from, now)) queueChat(brain.fill(replies.random(), cmd.from))
                 else queueChat("/e wave")
             }
@@ -1226,7 +1358,8 @@ class BotService : AccessibilityService() {
         override fun run() {
             if (!auto) return
             autoStep()
-            h.postDelayed(this, Random.nextLong(1500, 3500))
+            val m = mood()
+            h.postDelayed(this, Random.nextLong(m.gapMin, m.gapMax))
         }
     }
 
@@ -1259,19 +1392,34 @@ class BotService : AccessibilityService() {
             sendChat(prefs.safeIntro())
             return
         }
-        if (prefs.chatOn && now - lastChat > prefs.chatIntervalSec * 1000L) {
+        if (prefs.chatOn && now - lastChat > (prefs.chatIntervalSec * 1000L * mood().chatScale).toLong()) {
             sayRandomLine()
             return
         }
-        when (Random.nextInt(12)) {
-            in 0..4 -> walkRandom()
-            in 5..6 -> busyUntil = now + Random.nextLong(2500, 6000) // idle: just stand around for a bit
-            in 7..8 -> jump()
-            9 -> if (prefs.emotesOn) emoteRandom() else walkRandom()
-            else -> {
-                val moves = if (prefs.movesInAuto) MoveStore.load(this) else mutableListOf()
-                if (moves.isNotEmpty()) playMove(moves.random()) else walkRandom()
-            }
+        // optional: change mood by itself every ~10 minutes, only among the moods you ticked
+        if (prefs.moodRotate && now - moodSince > 10 * 60_000L) {
+            val pool = availableMoods().filter { it.id != mood().id }
+            if (pool.isNotEmpty()) setMood(pool.random(), false) else moodSince = now
+        }
+        val m = mood()
+        val look = if (prefs.lookAround) m.look else 0
+        val moves = if (prefs.movesInAuto && m.move > 0) MoveStore.load(this) else mutableListOf()
+        val weights = listOf(
+            "walk" to m.walk, "idle" to m.idle, "jump" to m.jump,
+            "emote" to if (prefs.emotesOn) m.emote else 0,
+            "move" to if (moves.isNotEmpty()) m.move else 0,
+            "look" to look
+        )
+        val total = weights.sumOf { it.second }
+        var roll = if (total > 0) Random.nextInt(total) else 0
+        val pick = weights.firstOrNull { roll -= it.second; roll < 0 }?.first ?: "walk"
+        when (pick) {
+            "walk" -> if (prefs.shiftLock) shiftWalk() else walkRandom()
+            "idle" -> busyUntil = now + Random.nextLong(2500, 6000) // just stand around for a bit
+            "jump" -> jump()
+            "emote" -> emoteRandom()
+            "move" -> playMove(moves.random())
+            "look" -> lookAround()
         }
     }
 }
