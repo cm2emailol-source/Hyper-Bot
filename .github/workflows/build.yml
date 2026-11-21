@@ -108,8 +108,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download --repo ggml-org/llama.cpp --pattern "llama-*-bin-win-cpu-x64.zip" --output llama.zip
-          if (!(Test-Path llama.zip)) { gh release view --repo ggml-org/llama.cpp --json assets --jq ".assets[].name"; exit 1 }
+          # newest release that actually has the Windows CPU build (the newest "nightly" tag can be empty)
+          $url = gh api "repos/ggml-org/llama.cpp/releases?per_page=20" --jq '[.[].assets[] | select(.name | test("bin-win-cpu-x64\\.zip$"))][0].browser_download_url'
+          Write-Host "llama.cpp: $url"
+          if (!$url) { exit 1 }
+          Invoke-WebRequest $url -OutFile llama.zip
           Expand-Archive llama.zip -DestinationPath pc/ai/llama
           Get-ChildItem pc/ai/llama -Recurse -Filter llama-server.exe | Select-Object FullName
 
