@@ -25,6 +25,7 @@ class MainActivity : Activity() {
     private lateinit var chatDiag: TextView
     private lateinit var movesBox: LinearLayout
     private lateinit var botNameEdit: EditText
+    private lateinit var followEdit: EditText
     private lateinit var repliesEdit: EditText
     private lateinit var waveBox: CheckBox
     private lateinit var introEdit: EditText
@@ -177,6 +178,16 @@ class MainActivity : Activity() {
             "half (not on buttons or chat). If the game has a shift-lock button, calibrate SHIFT on it and tick the box above; " +
             "if the bot's ON/OFF ever gets out of sync with the game, tap the game's button once yourself.", 13f))
 
+        col.addView(label("Follow", 17f, Color.rgb(0, 150, 230)))
+        col.addView(label("Player to follow (display name shown above their head):", 13f))
+        followEdit = EditText(this).apply { setText(prefs.followName); setSingleLine() }
+        col.addView(followEdit)
+        col.addView(label(
+            "Start it from the bubble: Follow... > Nearest player, this name, or someone who chatted recently. " +
+            "Limits: max 60 s per follow, 10 min cooldown per player, max 3 times per player per day. " +
+            "The bot tells them it's a bot following them and turns Listen on; if they say stop / go away it stops, " +
+            "says sorry and won't follow them again for an hour. It can only follow someone it can see on screen.", 13f))
+
         col.addView(label("Vision lite", 17f, Color.rgb(0, 150, 230)))
         col.addView(CheckBox(this).apply {
             text = "Turn to face people who talk to it"
@@ -218,6 +229,7 @@ class MainActivity : Activity() {
     }
 
     private fun save() {
+        prefs.followName = followEdit.text.toString()
         prefs.intro = introEdit.text.toString()
         prefs.linesText = linesEdit.text.toString()
         prefs.chatIntervalSec = intervalEdit.text.toString().toIntOrNull() ?: 45

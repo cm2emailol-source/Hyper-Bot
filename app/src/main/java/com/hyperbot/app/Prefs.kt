@@ -53,7 +53,12 @@ class Prefs(ctx: Context) {
         get() = p.getBoolean("faceTalker", true)
         set(v) = p.edit().putBoolean("faceTalker", v).apply()
 
-    /** Max seconds to follow someone who said "bot follow me". */
+    /** Player name for the bubble's Follow menu (you can also pick nearest player or someone who chatted). */
+    var followName: String
+        get() = p.getString("followName", "") ?: ""
+        set(v) = p.edit().putString("followName", v.trim()).apply()
+
+    /** Max seconds for any follow. */
     val followSec: Int get() = 60
 
     // ---- moods (you choose which ones the bot may use)

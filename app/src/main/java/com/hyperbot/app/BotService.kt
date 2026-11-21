@@ -217,6 +217,7 @@ class BotService : AccessibilityService() {
         addButton(p, "Say intro") { sendChat(prefs.safeIntro()) }
         addButton(p, "Chat test") { sendChat("Hyper-Bot chat test (I'm a bot)", test = true) }
         addButton(p, "Mood: " + mood().label) { showMoodPanel() }
+        addButton(p, if (followTarget != null) "Following: $followTarget" else "Follow...") { showFollowPanel() }
         addButton(p, "Look around") { lookAround() }
         shiftButtonView = addButton(p, shiftLabel()) { toggleShiftLock() }
         addButton(p, "Moves") { showMovesPanel() }
@@ -1009,19 +1010,19 @@ class BotService : AccessibilityService() {
             visionCount++
             val test = testPending
             val needChat = test || (listening && visionCount % 2 == 0 && now >= busyUntil && recLayer == null)
-            val needTags = followTarget != null || faceTarget != null
+            val needTags = followTarget != null || faceTarget != null || pendingNearest
             val needStuck = prefs.stuckOn && (auto || followTarget != null) && recLayer == null
             if (needChat || needTags || needStuck) {
                 capture { bmp ->
                     if (needStuck) checkStuck(bmp)
-                    if (needTags) seekTags(bmp)
+                    if (needTags) { if (pendingNearest) seekNearest(bmp) else seekTags(bmp) }
                     if (needChat) {
                         testPending = false
                         ocrChat(bmp, test)
                     }
                 }
             }
-            if (listening || auto || followTarget != null || faceTarget != null || testPending) {
+            if (listening || auto || followTarget != null || faceTarget != null || testPending || pendingNearest) {
                 lh.postDelayed(this, 1200)
             } else {
                 visionRunning = false
@@ -1080,15 +1081,130 @@ class BotService : AccessibilityService() {
     private var stuckCount = 0
 
     /** Follows ONLY the player who asked ("bot follow me"), for a limited time. "bot stop" ends it. */
+    private val guard by lazy { FollowGuard(this) }
+    private var ownerFollow = false
+    private var pendingNearest = false
+    private val recentNames = ArrayDeque<String>()
+
     fun startFollow(name: String) {
         followTarget = name
         followUntil = System.currentTimeMillis() + prefs.followSec * 1000L
         followLost = 0
+        ownerFollow = false
         ensureVision()
+    }
+
+    /** A follow YOU start (not asked for by the player): checked against the cooldowns, and the player is told. */
+    private fun startOwnerFollow(name: String) {
+        if (followTarget != null) stopFollow()
+        val why = guard.check(name)
+        if (why != null) {
+            toast("Hyper-Bot: can't follow - $why")
+            return
+        }
+        guard.noteStart(name)
+        startFollow(name)
+        ownerFollow = true
+        if (!listening) startListening() // so they can always say "bot stop"
+        queueChat(brain.fill("hi {name}, im a bot following you for a bit - say bot stop and ill stop", name))
+        toast("Hyper-Bot: following $name (max ${prefs.followSec} s)")
     }
 
     fun stopFollow() {
         followTarget = null
+        ownerFollow = false
+        pendingNearest = false
+    }
+
+    private fun noteName(n: String) {
+        if (n.isBlank() || similar(normName(n), normName(prefs.botName))) return
+        recentNames.removeAll { it.equals(n, ignoreCase = true) }
+        recentNames.addFirst(n)
+        while (recentNames.size > 4) recentNames.removeLast()
+    }
+
+    private fun showFollowPanel() {
+        hidePanel()
+        val p = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            background = round(DARK, 12, CYAN)
+        }
+        p.addView(TextView(this).apply {
+            text = "Follow (max ${prefs.followSec} s)"
+            setTextColor(CYAN)
+            textSize = 15f
+            setPadding(dp(4), 0, dp(4), dp(6))
+        })
+        if (followTarget != null) {
+            addButton(p, "Stop following", Color.rgb(200, 40, 40)) { stopFollow(); hidePanel(); toast("Hyper-Bot: stopped following") }
+        }
+        addButton(p, "Nearest player") {
+            if (Build.VERSION.SDK_INT < 30) toast("Needs Android 11 or newer") else {
+                stopFollow()
+                pendingNearest = true
+                ensureVision()
+                toast("Hyper-Bot: looking for the nearest name tag...")
+            }
+            hidePanel()
+        }
+        val names = (listOf(prefs.followName) + recentNames).filter { it.isNotBlank() }.distinctBy { it.lowercase() }.take(5)
+        for (n in names) addButton(p, "Follow: $n") { hidePanel(); startOwnerFollow(n) }
+        if (names.isEmpty()) p.addView(TextView(this).apply {
+            text = "Set a name in the app, or names\nof people who chat appear here"
+            setTextColor(Color.LTGRAY)
+            textSize = 11f
+        })
+        addButton(p, "Back", Color.GRAY) { hidePanel(); togglePanel() }
+        val blp = bubbleLp ?: return
+        val lp = overlayParams(
+            WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
+            blp.x + dp(62), blp.y
+        )
+        wm.addView(p, lp)
+        panel = p
+    }
+
+    /** Reads the screen once and picks the closest-looking name tag (the biggest one outside the chat). */
+    private fun seekNearest(bmp: Bitmap) {
+        pendingNearest = false
+        val scale = minOf(1f, 1280f / bmp.width)
+        val img = if (scale < 1f) Bitmap.createScaledBitmap(bmp, (bmp.width * scale).toInt(), (bmp.height * scale).toInt(), true) else bmp
+        val (lx1, ly1) = prefs.point("LOG1")
+        val (lx2, ly2) = prefs.point("LOG2")
+        val me = normName(prefs.botName)
+        val tagRe = Regex("^@?[A-Za-z0-9_]{3,20}( [A-Za-z0-9_]{1,20})?$")
+        val rec = recognizer ?: TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS).also { recognizer = it }
+        rec.process(InputImage.fromBitmap(img, 0)).addOnSuccessListener { text ->
+            var bestName: String? = null
+            var bestScore = -1f
+            for (block in text.textBlocks) for (line in block.lines) {
+                val box = line.boundingBox ?: continue
+                val t = line.text.trim()
+                val fx = box.exactCenterX() / img.width
+                val fy = box.exactCenterY() / img.height
+                val inChat = fx in minOf(lx1, lx2)..maxOf(lx1, lx2) && fy in minOf(ly1, ly2)..maxOf(ly1, ly2)
+                if (inChat || fy < 0.08f || fy > 0.85f || !tagRe.matches(t)) continue
+                if (me.isNotEmpty() && similar(normName(t), me)) continue
+                if (guard.check(t.removePrefix("@")) != null) continue // skip players on cooldown
+                // bigger tag = closer; tags near the middle of the screen win ties
+                val score = box.height().toFloat() / img.height * 10f - abs(fx - 0.5f)
+                if (score > bestScore) {
+                    bestScore = score
+                    bestName = t.removePrefix("@")
+                }
+            }
+            val n = bestName
+            if (n == null) toast("Hyper-Bot: no name tag found (or everyone nearby is on cooldown)")
+            else startOwnerFollow(n)
+        }
+    }
+
+    /** The player being followed said something like stop / go away: stop, apologise, block them for an hour. */
+    private fun wantsNoFollow(msg: String): Boolean {
+        val m = " " + msg.lowercase().replace(Regex("[^a-z ]"), " ") + " "
+        return listOf(" stop ", " go away ", " leave ", " stop following", " dont follow", " don t follow",
+            " creepy ", " stalker", " stalking", " get away ", " back off", " no ", " quit ", " stahp").any { m.contains(it) }
     }
 
     /** Small joystick nudge towards someone who talked to the bot, so it turns to face them. */
@@ -1126,7 +1242,7 @@ class BotService : AccessibilityService() {
     private fun seekTags(bmp: Bitmap) {
         val now = System.currentTimeMillis()
         if (followTarget != null && now > followUntil) {
-            followTarget = null
+            stopFollow()
             toast("Hyper-Bot: done following")
             return
         }
@@ -1156,7 +1272,7 @@ class BotService : AccessibilityService() {
             val b = best
             if (b == null) {
                 if (followTarget != null && ++followLost >= 4) {
-                    followTarget = null
+                    stopFollow()
                     toast("Hyper-Bot: lost $target")
                 }
                 return@addOnSuccessListener
@@ -1267,6 +1383,14 @@ class BotService : AccessibilityService() {
         val now = System.currentTimeMillis()
         for (l in brain.newLines(lines)) {
             val c = brain.parse(l) ?: continue
+            noteName(c.name)
+            val ft = followTarget
+            if (ft != null && similar(normName(c.name), normName(ft)) && wantsNoFollow(c.message)) {
+                if (ownerFollow) guard.block(ft)
+                stopFollow()
+                queueChat(brain.fill("ok sorry {name}! i'll stop", c.name))
+                break
+            }
             if (prefs.commandsOn) {
                 val cmd = brain.command(c, prefs.botName, now)
                 if (cmd != null) {
@@ -1303,7 +1427,11 @@ class BotService : AccessibilityService() {
                     queueChat("/e point")
                 }
             }
-            "stop" -> stopFollow()
+            "stop" -> {
+                val ft = followTarget
+                if (ft != null && ownerFollow && similar(normName(cmd.from), normName(ft))) guard.block(ft)
+                stopFollow()
+            }
             "mood" -> if (brain.allowChatAnswer(cmd.from, now)) queueChat("bot mood: " + mood().label.lowercase())
             "hi", "hello", "hey" -> {
                 faceToward(cmd.from)
