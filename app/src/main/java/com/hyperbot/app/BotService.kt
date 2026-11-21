@@ -5,6 +5,7 @@ import android.accessibilityservice.GestureDescription
 import android.annotation.SuppressLint
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Path
 import android.graphics.PixelFormat
@@ -16,6 +17,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.DisplayMetrics
 import android.util.TypedValue
+import android.view.Display
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -30,6 +32,10 @@ import android.widget.Toast
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.TextRecognizer
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlin.random.Random
 
 /**
@@ -80,6 +86,8 @@ class BotService : AccessibilityService() {
 
     override fun onDestroy() {
         stopAuto()
+        stopListening()
+        try { recognizer?.close() } catch (_: Exception) {}
         removeAllViews()
         instance = null
         super.onDestroy()
@@ -208,6 +216,8 @@ class BotService : AccessibilityService() {
         addButton(p, "Say intro") { sendChat(prefs.safeIntro()) }
         addButton(p, "Chat test") { sendChat("Hyper-Bot chat test (I'm a bot)", test = true) }
         addButton(p, "Moves") { showMovesPanel() }
+        listenButton = addButton(p, listenLabel()) { toggleListen() }
+        addButton(p, "Listen test") { readChat(true) }
         addButton(p, if (markers.isEmpty()) "Calibrate" else "Save calibration") { toggleCalibration() }
         addButton(p, "STOP", Color.rgb(200, 40, 40)) { stopAuto(); hidePanel(); toast("Hyper-Bot stopped") }
 
@@ -224,6 +234,7 @@ class BotService : AccessibilityService() {
         panel?.let { try { wm.removeView(it) } catch (_: Exception) {} }
         panel = null
         autoButton = null
+        listenButton = null
     }
 
     private fun addButton(parent: LinearLayout, label: String, color: Int = CYAN, onClick: () -> Unit): Button {
@@ -246,6 +257,7 @@ class BotService : AccessibilityService() {
     }
 
     private fun autoLabel() = if (auto) "Auto: ON" else "Auto: OFF"
+    private fun listenLabel() = if (listening) "Listen: ON" else "Listen: OFF"
 
     private fun removeAllViews() {
         hidePanel()
@@ -542,6 +554,8 @@ class BotService : AccessibilityService() {
     fun sendChat(text: String, test: Boolean = false) {
         val now = System.currentTimeMillis()
         if (now < busyUntil && !test) return
+        lastOwnChat = now
+        brain.noteOwn(text)
         busyUntil = now + 12_000 + text.length * 140L
         diag = StringBuilder()
         diag.append("text: \"").append(text).append("\"\n")
@@ -777,7 +791,7 @@ class BotService : AccessibilityService() {
     private fun showDiag(text: String) {
         diagView?.let { try { wm.removeView(it) } catch (_: Exception) {} }
         val v = TextView(this).apply {
-            this.text = "Hyper-Bot chat test (tap to close)\n\n$text"
+            this.text = "Hyper-Bot (tap to close)\n\n$text"
             textSize = 12f
             setTextColor(Color.WHITE)
             setPadding(dp(12), dp(10), dp(12), dp(10))
@@ -811,6 +825,135 @@ class BotService : AccessibilityService() {
         if (!force && now - lastEmote < 60_000) return
         lastEmote = now
         sendChat("/e " + Prefs.EMOTES.random())
+    }
+
+    // ---------------------------------------------------------------- listening (reply when talked to)
+
+    private val brain = ChatBrain()
+    private val lh = Handler(Looper.getMainLooper()) // separate timer: stopping Auto doesn't stop Listen
+    private var listening = false
+    private var listenButton: Button? = null
+    private var lastOwnChat = 0L
+    private val chatQueue = ArrayDeque<String>()
+    private var recognizer: TextRecognizer? = null
+
+    private fun toggleListen() {
+        if (listening) stopListening() else startListening()
+        listenButton?.text = listenLabel()
+    }
+
+    private fun startListening() {
+        if (Build.VERSION.SDK_INT < 30) {
+            toast("Listening needs Android 11 or newer")
+            return
+        }
+        listening = true
+        brain.reset()
+        lh.post(listenTick)
+        toast("Hyper-Bot: listening to chat")
+    }
+
+    private fun stopListening() {
+        listening = false
+        chatQueue.clear()
+        lh.removeCallbacksAndMessages(null)
+        listenButton?.text = listenLabel()
+    }
+
+    private val listenTick = object : Runnable {
+        override fun run() {
+            if (!listening) return
+            if (System.currentTimeMillis() >= busyUntil && recLayer == null) readChat(false)
+            lh.postDelayed(this, 2500)
+        }
+    }
+
+    /** Screenshot (Android 11+, no extra permission for accessibility services), then read the chat area. */
+    private fun readChat(test: Boolean) {
+        if (Build.VERSION.SDK_INT < 30) {
+            if (test) showDiag("Listening needs Android 11 or newer")
+            return
+        }
+        takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : AccessibilityService.TakeScreenshotCallback {
+            override fun onSuccess(result: AccessibilityService.ScreenshotResult) {
+                var bmp: Bitmap? = null
+                try {
+                    val hw = Bitmap.wrapHardwareBuffer(result.hardwareBuffer, result.colorSpace)
+                    bmp = hw?.copy(Bitmap.Config.ARGB_8888, false)
+                    hw?.recycle()
+                } catch (_: Exception) {
+                } finally {
+                    try { result.hardwareBuffer.close() } catch (_: Exception) {}
+                }
+                val b = bmp
+                if (b == null) {
+                    if (test) showDiag("Listen test: screenshot failed")
+                    return
+                }
+                ocrChat(b, test)
+            }
+
+            override fun onFailure(errorCode: Int) {
+                if (test) showDiag("Listen test: screenshot failed (code $errorCode). Try again in a second.")
+            }
+        })
+    }
+
+    /** Cuts out the chat area (LOG1 = top-left, LOG2 = bottom-right) and reads it with on-device text recognition. */
+    private fun ocrChat(bmp: Bitmap, test: Boolean) {
+        val (ax, ay) = prefs.point("LOG1")
+        val (bx, by) = prefs.point("LOG2")
+        val x1 = (minOf(ax, bx) * bmp.width).toInt().coerceIn(0, bmp.width - 20)
+        val y1 = (minOf(ay, by) * bmp.height).toInt().coerceIn(0, bmp.height - 20)
+        val x2 = (maxOf(ax, bx) * bmp.width).toInt().coerceIn(x1 + 20, bmp.width)
+        val y2 = (maxOf(ay, by) * bmp.height).toInt().coerceIn(y1 + 20, bmp.height)
+        var crop = Bitmap.createBitmap(bmp, x1, y1, x2 - x1, y2 - y1)
+        if (crop.height < 500) crop = Bitmap.createScaledBitmap(crop, crop.width * 2, crop.height * 2, true)
+        val rec = recognizer ?: TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS).also { recognizer = it }
+        rec.process(InputImage.fromBitmap(crop, 0))
+            .addOnSuccessListener { text ->
+                val lines = text.textBlocks.flatMap { block -> block.lines.map { it.text } }
+                handleChat(lines, test)
+            }
+            .addOnFailureListener { e ->
+                if (test) showDiag("Listen test: text recognition failed: ${e.message}")
+            }
+    }
+
+    private fun handleChat(lines: List<String>, test: Boolean) {
+        if (test) {
+            val sb = StringBuilder("Listen test: read ${lines.size} line(s) from the chat area\n\n")
+            for (l in lines.take(12)) {
+                val c = brain.parse(l)
+                sb.append(if (c != null) "- ${c.name}: ${c.message}\n" else "- (no name) $l\n")
+            }
+            if (lines.isEmpty()) sb.append("(nothing read - is the chat open, and are LOG1 / LOG2 around the messages?)\n")
+            showDiag(sb.toString())
+            return
+        }
+        val now = System.currentTimeMillis()
+        for (l in brain.newLines(lines)) {
+            val c = brain.parse(l) ?: continue
+            if (!brain.shouldReply(c, prefs.botName, lastOwnChat, now)) continue
+            val replies = prefs.replyLines
+            if (replies.isEmpty()) break
+            if (prefs.waveOnReply) queueChat("/e wave")
+            queueChat(brain.fill(replies.random(), c.name))
+            break // at most one reply per read
+        }
+    }
+
+    private fun queueChat(text: String) {
+        chatQueue.addLast(text)
+        lh.post(pump)
+    }
+
+    private val pump = object : Runnable {
+        override fun run() {
+            if (chatQueue.isEmpty()) return
+            if (System.currentTimeMillis() >= busyUntil) sendChat(chatQueue.removeFirst())
+            if (chatQueue.isNotEmpty()) lh.postDelayed(this, 500)
+        }
     }
 
     // ---------------------------------------------------------------- auto mode

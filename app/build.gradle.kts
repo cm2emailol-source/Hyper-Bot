@@ -11,8 +11,8 @@ android {
         applicationId = "com.hyperbot.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 5
-        versionName = "0.2.0"
+        versionCode = 6
+        versionName = "0.3.0"
     }
 
     // Fixed debug signing key, so new builds install over old ones (no uninstalling).
@@ -42,4 +42,9 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+}
+
+dependencies {
+    // On-device text recognition (offline) to read the chat for Listen mode
+    implementation("com.google.mlkit:text-recognition:16.0.1")
 }

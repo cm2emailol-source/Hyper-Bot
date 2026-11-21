@@ -33,6 +33,22 @@ class Prefs(ctx: Context) {
         get() = p.getString("lastChatDiag", "") ?: ""
         set(v) = p.edit().putString("lastChatDiag", v).apply()
 
+    /** Your bot account's Roblox display name: used to spot mentions and to ignore its own messages. */
+    var botName: String
+        get() = p.getString("botName", "") ?: ""
+        set(v) = p.edit().putString("botName", v.trim()).apply()
+
+    var replyLinesText: String
+        get() = p.getString("replyLines", DEFAULT_REPLIES) ?: DEFAULT_REPLIES
+        set(v) = p.edit().putString("replyLines", v).apply()
+
+    val replyLines: List<String>
+        get() = replyLinesText.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
+
+    var waveOnReply: Boolean
+        get() = p.getBoolean("waveOnReply", true)
+        set(v) = p.edit().putBoolean("waveOnReply", v).apply()
+
     var movesInAuto: Boolean
         get() = p.getBoolean("movesInAuto", true)
         set(v) = p.edit().putBoolean("movesInAuto", v).apply()
@@ -65,19 +81,32 @@ class Prefs(ctx: Context) {
             "having a great day here"
         ).joinToString("\n")
 
+        /** {name} is replaced with the player's name. */
+        val DEFAULT_REPLIES = listOf(
+            "hi {name} beep boop",
+            "hello {name} nice to meet you",
+            "hey {name} im a friendly bot",
+            "beep boop hi {name}",
+            "{name} hello there",
+            "hi {name} i like your avatar"
+        ).joinToString("\n")
+
         val EMOTES = listOf("wave", "point", "cheer", "laugh", "dance", "dance2", "dance3")
 
         /**
          * Roblox mobile controls (landscape), as fractions of the screen. Rough defaults:
          * calibrate once with the bubble's "Calibrate" button so they match your phone.
-         * JOY = joystick centre, JUMP = jump button, CHAT = chat icon, BOX = chat input box, SEND = send button.
+         * JOY = joystick centre, JUMP = jump button, CHAT = chat icon, BOX = chat input box, SEND = send button,
+         * LOG1 / LOG2 = top-left and bottom-right corners of the chat messages area (for Listen).
          */
         val POINTS: LinkedHashMap<String, Pair<Float, Float>> = linkedMapOf(
             "JOY" to Pair(0.18f, 0.72f),
             "JUMP" to Pair(0.88f, 0.78f),
             "CHAT" to Pair(0.12f, 0.06f),
             "BOX" to Pair(0.30f, 0.38f),
-            "SEND" to Pair(0.55f, 0.38f)
+            "SEND" to Pair(0.55f, 0.38f),
+            "LOG1" to Pair(0.02f, 0.10f),
+            "LOG2" to Pair(0.40f, 0.45f)
         )
     }
 }

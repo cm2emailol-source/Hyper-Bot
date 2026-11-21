@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Hyper-Bot</string>
-    <string name="a11y_desc">Hyper-Bot shows a floating control bubble and performs taps and swipes for you in Roblox (walk, jump, emotes, chat lines you wrote). It only acts when you press its buttons or turn on Auto, it always announces itself as a bot, and it does not read, store or send anything from other apps.</string>
+    <string name="a11y_desc">Hyper-Bot shows a floating control bubble and performs taps and swipes for you in Roblox (walk, jump, emotes, chat lines you wrote). It only acts when you press its buttons or turn on Auto/Listen, and it always announces itself as a bot. With Listen on, it takes a screenshot every few seconds and reads the chat area on-device so it can reply when someone talks to it: this is processed in memory only, never saved, and never sent anywhere (the app has no internet permission).</string>
 </resources>

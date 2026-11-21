@@ -24,6 +24,9 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var chatDiag: TextView
     private lateinit var movesBox: LinearLayout
+    private lateinit var botNameEdit: EditText
+    private lateinit var repliesEdit: EditText
+    private lateinit var waveBox: CheckBox
     private lateinit var introEdit: EditText
     private lateinit var linesEdit: EditText
     private lateinit var intervalEdit: EditText
@@ -104,6 +107,26 @@ class MainActivity : Activity() {
             13f
         ))
 
+        col.addView(label("Listen: reply when someone talks to the bot", 17f, Color.rgb(0, 150, 230)))
+        col.addView(label("Bot's Roblox display name (so it knows when it's mentioned):", 15f, Color.BLACK))
+        botNameEdit = EditText(this).apply { setText(prefs.botName); setSingleLine() }
+        col.addView(botNameEdit)
+        col.addView(label("Reply lines ({name} = the player's name), one per line:", 15f, Color.BLACK))
+        repliesEdit = EditText(this).apply {
+            setText(prefs.replyLinesText)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            minLines = 4
+            gravity = Gravity.TOP or Gravity.START
+        }
+        col.addView(repliesEdit)
+        waveBox = CheckBox(this).apply { text = "Wave before replying"; isChecked = prefs.waveOnReply }
+        col.addView(waveBox)
+        col.addView(label(
+            "It replies when someone says \"bot\" / \"robot\" / its name, or says hi soon after the bot spoke. " +
+            "Max one reply every 12 s, one per person per minute, 4 per minute. Chat is read from the screen in memory only - " +
+            "nothing is saved or sent. In Roblox: Calibrate, put LOG1 / LOG2 on the corners of the chat messages, then use " +
+            "Listen test and Listen: ON in the bubble.", 13f))
+
         col.addView(label("Moves (record them in Roblox: bubble > Moves > + Record new move):", 15f, Color.BLACK))
         col.addView(CheckBox(this).apply {
             text = "Use my moves in Auto mode"
@@ -135,6 +158,9 @@ class MainActivity : Activity() {
         prefs.chatIntervalSec = intervalEdit.text.toString().toIntOrNull() ?: 45
         prefs.chatOn = chatBox.isChecked
         prefs.emotesOn = emoteBox.isChecked
+        prefs.botName = botNameEdit.text.toString()
+        prefs.replyLinesText = repliesEdit.text.toString()
+        prefs.waveOnReply = waveBox.isChecked
         intervalEdit.setText(prefs.chatIntervalSec.toString())
         if (!prefs.intro.contains("bot", ignoreCase = true)) {
             toast("Intro must contain \"bot\" - using the default intro")
