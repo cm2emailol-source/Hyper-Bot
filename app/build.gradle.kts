@@ -11,11 +11,25 @@ android {
         applicationId = "com.hyperbot.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.1.1"
+        versionCode = 3
+        versionName = "0.1.2"
+    }
+
+    // Fixed debug signing key, so new builds install over old ones (no uninstalling).
+    // Debug-only key for this private project; not for publishing on a store.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("hyperbot-debug.keystore")
+            storePassword = "android"
+            keyAlias = "hyperbot"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {
+        getByName("debug") {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = false
         }

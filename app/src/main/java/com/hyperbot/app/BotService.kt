@@ -8,6 +8,7 @@ import android.content.ClipboardManager
 import android.graphics.Color
 import android.graphics.Path
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
@@ -326,11 +327,12 @@ class BotService : AccessibilityService() {
     /** Step-by-step record of the last chat attempt (shown by "Chat test", saved for the app screen). */
     private var diag = StringBuilder()
 
-    /** Opens chat, types the text into Roblox's chat box and sends it. */
+    /** Opens chat, types the text into Roblox's chat box and sends it.
+     *  Method 1: set the box's text. Method 2: paste. Method 3: tap the letters on the on-screen keyboard. */
     fun sendChat(text: String, test: Boolean = false) {
         val now = System.currentTimeMillis()
         if (now < busyUntil && !test) return
-        busyUntil = now + 4500
+        busyUntil = now + 4500 + text.length * 140L
         diag = StringBuilder()
         diag.append("text: \"").append(text).append("\"\n")
         val (cx, cy) = pos("CHAT")
@@ -340,21 +342,103 @@ class BotService : AccessibilityService() {
         h.postDelayed({ tap(bx, by) }, 700)
         h.postDelayed({
             val node = findChatBox()
-            if (node == null || !typeInto(node, text)) {
-                report("FAILED - could not type into the chat box", true)
-                return@postDelayed
-            }
-            h.postDelayed({
-                if (pressEnter(node)) {
-                    diag.append("send: keyboard Enter\n")
-                } else {
-                    val (sx, sy) = pos("SEND")
-                    tap(sx, sy)
-                    diag.append("send: tapped SEND at ${sx.toInt()},${sy.toInt()}\n")
+            if (node != null && typeInto(node, text)) {
+                h.postDelayed({ finishSend(node, test) }, 450)
+            } else {
+                diag.append("trying method 3: tapping the on-screen keyboard\n")
+                typeWithKeyboard(text) { ok ->
+                    if (ok) h.postDelayed({ finishSend(node, test) }, 300)
+                    else report("FAILED - could not type (no text box and no usable keyboard keys)", true)
                 }
-                report("done - check whether the message appeared in chat", test)
-            }, 450)
+            }
         }, 1700)
+    }
+
+    private fun finishSend(node: AccessibilityNodeInfo?, test: Boolean) {
+        when {
+            node != null && pressEnter(node) -> diag.append("send: keyboard Enter action\n")
+            tapKeyboardEnter() -> diag.append("send: tapped the keyboard's Enter key\n")
+            else -> {
+                val (sx, sy) = pos("SEND")
+                tap(sx, sy)
+                diag.append("send: tapped SEND at ${sx.toInt()},${sy.toInt()}\n")
+            }
+        }
+        report("done - check whether the message appeared in chat", test)
+    }
+
+    // ---- method 3: on-screen keyboard ----
+
+    private fun keyboardRoot(): AccessibilityNodeInfo? = try {
+        windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }?.root
+    } catch (_: Exception) { null }
+
+    private fun keyLabel(n: AccessibilityNodeInfo): String =
+        (n.text?.toString()?.takeIf { it.isNotBlank() } ?: n.contentDescription?.toString() ?: "").trim()
+
+    private fun collectKeys(n: AccessibilityNodeInfo?, out: MutableList<AccessibilityNodeInfo>) {
+        if (n == null) return
+        if (n.isVisibleToUser && keyLabel(n).isNotEmpty()) out.add(n)
+        for (i in 0 until n.childCount) collectKeys(n.getChild(i), out)
+    }
+
+    private fun keyboardKeys(): List<AccessibilityNodeInfo> {
+        val out = mutableListOf<AccessibilityNodeInfo>()
+        collectKeys(keyboardRoot(), out)
+        return out
+    }
+
+    private fun findKey(c: Char): AccessibilityNodeInfo? {
+        val keys = keyboardKeys()
+        if (c == ' ') return keys.firstOrNull { val l = keyLabel(it).lowercase(); l == "space" || l.contains("space") }
+        val want = c.toString()
+        return keys.firstOrNull { keyLabel(it).equals(want, ignoreCase = true) }
+    }
+
+    private fun tapNode(n: AccessibilityNodeInfo) {
+        val r = Rect()
+        n.getBoundsInScreen(r)
+        tap(r.exactCenterX(), r.exactCenterY())
+    }
+
+    /** Taps each character's key, ~0.13 s apart. Characters not on the current keyboard page are skipped. */
+    private fun typeWithKeyboard(text: String, done: (Boolean) -> Unit) {
+        val count = keyboardKeys().size
+        diag.append("keyboard keys visible: $count\n")
+        if (count < 10) {
+            done(false)
+            return
+        }
+        var i = 0
+        var typed = 0
+        val skipped = StringBuilder()
+        fun step() {
+            if (i >= text.length) {
+                diag.append("typed $typed of ${text.length} characters")
+                if (skipped.isNotEmpty()) diag.append(" (skipped: ").append(skipped).append(")")
+                diag.append("\n")
+                done(typed > 0)
+                return
+            }
+            val c = text[i++]
+            val k = findKey(c)
+            if (k != null) {
+                tapNode(k)
+                typed++
+            } else if (!skipped.contains(c)) {
+                skipped.append(c)
+            }
+            h.postDelayed({ step() }, 130)
+        }
+        step()
+    }
+
+    private fun tapKeyboardEnter(): Boolean {
+        val names = listOf("enter", "done", "send", "go", "return", "next")
+        val k = keyboardKeys().firstOrNull { key -> val l = keyLabel(key).lowercase(); names.any { l == it || l.startsWith(it) } }
+            ?: return false
+        tapNode(k)
+        return true
     }
 
     /** Looks through every window (not just the active one: the keyboard can be the active window). */
