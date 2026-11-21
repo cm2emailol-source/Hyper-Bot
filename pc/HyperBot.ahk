@@ -102,7 +102,8 @@ global S := {auto: false, listening: false, busyUntil: 0, lastChat: 0, lastIntro
     faceTarget: "", faceUntil: 0, lastWalkAt: -9999999, prevThumb: "", stuckCount: 0, stuckEscapes: 0,
     recording: false, recStart: 0, recEvents: [], recState: Map(), recentNames: [], lastRead: [],
     flyOn: false, flyPid: 0, flySound: 0, flyPraise: 0, flyInsult: 0, flyWater: 0, flyTouch: 0, flyWind: 0,
-    flyPrev: "", flyLast: Map(), flyLastWord: -9999999, flyLastGroomChat: -9999999, flyStarted: 0}
+    flyPrev: "", flyLast: Map(), flyLastWord: -9999999, flyLastGroomChat: -9999999, flyStarted: 0,
+    flyOdour: 0, flyOdourSeq: 0, flyPunish: 0, flySmellOf: Map(), flyFeel: Map(), flyLastSpeaker: ""}
 global HELD := Map()
 global brain := ChatBrain()
 global smart := SmartBrain()
@@ -537,7 +538,7 @@ HandleChat(lines, test) {
             continue
         NoteName(cl.name)
         if S.flyOn && !brain.Ignored(cl, C["botName"]) {
-            FlyHears(cl.message)
+            FlyHears(cl.name, cl.message)
             cmd := On("commandsOn") ? brain.Command(cl, C["botName"], now) : ""
             if cmd != "" && (cmd.name = "stop" || cmd.name = "help" || cmd.name = "commands")
                 RunCommand(cmd, now)
@@ -1147,6 +1148,10 @@ BuildGui() {
         . "nice words = sugar, mean words = bitter, walls = touch, jumping = wind, screen motion = eyes, brightness = ocelli. "
         . "Its real command neurons become the controls: forward/turning neurons = walk and steer, MDN = walk backwards, "
         . "giant fiber = escape jump, grooming neurons = grooming, mouth motor neurons = typing (fly gibberish, max 1 a minute).")
+    gw.AddText("x24 y+8 w530", "FLY LEARNING (as in 'Specific, cumulative and reversible odour learning in a whole-brain connectome model of Drosophila'): "
+        . "every player has their own smell. Mean words from a player = punishment (PPL1 dopamine) paired with their smell, which weakens "
+        . "Kenyon cell -> approach-MBON synapses. The fly can learn to back away from that player, can unlearn it, and remembers between sessions "
+        . "(fly\fly_memory.npz - delete it to reset). Praise is sugar (feeding), not learning: the paper found no reward learning.")
     gw.AddText("x24 y+8 w530", "How: tick 'Fly Brain' on the Moods && Camera tab, Save, pick it as the mood, then Auto (F8). "
         . "Listen turns on by itself so the fly can 'hear' chat. It runs in slow motion if your PC can't keep up - that's normal.")
     gw.SetFont("s10 norm c000000")
@@ -1307,8 +1312,18 @@ FlyStop() {
     try G.flyMon.Value := "Fly Brain stopped."
 }
 
-FlyHears(msg) {
+; every player gets their own smell (one of 52 olfactory receptor classes), picked from their name
+FlySmell(name) {
+    h := 0
+    loop parse StrLower(name)
+        h := Mod(h * 31 + Ord(A_LoopField), 1000003)
+    return Mod(h, 52)
+}
+
+FlyHears(name, msg) {
     S.flySound += 1
+    S.flyOdour := FlySmell(name), S.flyOdourSeq += 1, S.flyLastSpeaker := name
+    S.flySmellOf[name] := S.flyOdour
     m := " " RegExReplace(StrLower(msg), "[^a-z ]", " ") " "
     for w in [" good ", " cute ", " cool ", " love ", " nice ", " awesome ", " best ", " sweet ", " yum ", " candy ", " sugar ", " pizza ", " food ", " cake ", " honey ", " pretty "]
         if InStr(m, w) {
@@ -1318,6 +1333,7 @@ FlyHears(msg) {
     for w in [" bad ", " dumb ", " stupid ", " ugly ", " trash ", " noob ", " hate ", " gross ", " ew ", " weird ", " cringe "]
         if InStr(m, w) {
             S.flyInsult += 1
+            S.flyPunish += 1 ; punishment (PPL1 dopamine) paired with this player's smell -> the fly can learn
             break
         }
     if InStr(m, " water ") || InStr(m, " drink ") || InStr(m, " rain ")
@@ -1367,7 +1383,7 @@ FlyWriteSenses(quit := 0) {
     players := Min(3, S.recentNames.Length)
     txt := "sound=" S.flySound "`npraise=" S.flyPraise "`ninsult=" S.flyInsult "`nwater=" S.flyWater
         . "`ntouch=" S.flyTouch "`nwind=" S.flyWind "`nmotionL=" mL "`nmotionR=" mR "`nlightchange=" lc
-        . "`nplayers=" players "`nquit=" quit "`n"
+        . "`nplayers=" players "`nodour=" S.flyOdour "`nodourseq=" S.flyOdourSeq "`npunishseq=" S.flyPunish "`nquit=" quit "`n"
     f := A_ScriptDir "\fly\io\senses.txt"
     try {
         FileOpen(f ".tmp", "w", "UTF-8-RAW").Write(txt)
@@ -1409,6 +1425,9 @@ FlyTick() {
     backed := FlyNum(a, "backs") > FlyNum(last, "backs")
     groomed := FlyNum(a, "grooms") > FlyNum(last, "grooms")
     spoke := FlyNum(a, "words") > FlyNum(last, "words") && a.Has("word") && a["word"] != ""
+    avoided := FlyNum(a, "avoids") > FlyNum(last, "avoids")
+    if a.Has("odour") && a["odour"] != "" && (!last.Has("feel") || last["feel"] != a["feel"]) && S.flyLastSpeaker != ""
+        S.flyFeel[S.flyLastSpeaker] := FlyNum(a, "learned")
     S.flyLast := a
     if !last.Has("seq")
         return Status("Fly Brain is alive")
@@ -1416,7 +1435,9 @@ FlyTick() {
     spd := Max(0.2, FlyNum(a, "speed")) ; slow-motion brain -> longer key presses per decision
     if jumped
         Jump(), S.flyWind -= 1, did.Push("ESCAPE JUMP (giant fiber)")
-    if backed
+    if avoided
+        Hold("s", Min(1200, Round(600 / spd))), CamTurn(Random(0, 1) ? 1 : -1, 300), did.Push("backs away from " S.flyLastSpeaker " (learned)")
+    else if backed
         Hold("s", Min(900, Round(450 / spd))), did.Push("moonwalk back (MDN)")
     else if fwd > 0.3
         Hold("w", Min(900, Round(220 / spd))), S.lastWalkAt := now, did.Push("walk " Round(fwd * 100) "%")
@@ -1434,7 +1455,9 @@ FlyTick() {
         . "descending (command) neuron spikes: " a["dn"] "    mouth motor spikes: " a["mouth"] "`r`n"
         . "forward drive: " Round(fwd * 100) "%    turn: " turn "`r`n"
         . "escape jumps: " a["jumps"] "   moonwalks: " a["backs"] "   grooms: " a["grooms"] "   words typed: " a["words"] "`r`n"
-        . "senses: sound " S.flySound "  sugar " S.flyPraise "  bitter " S.flyInsult "  touch " S.flyTouch "  wind " S.flyWind "`r`n`r`n"
+        . "senses: sound " S.flySound "  sugar " S.flyPraise "  bitter " S.flyInsult "  touch " S.flyTouch "  wind " S.flyWind "`r`n"
+        . "LEARNING: plastic synapses at " Round(FlyNum(a, "plastic") * 100) "% of normal   last smell: " (a.Has("odour") ? a["odour"] : "-") "`r`n"
+        . "feelings (learned avoidance, Hz): " FlyFeelings() "`r`n`r`n"
         . "now: " (did.Length ? JoinArr(did) : "resting")
 }
 
@@ -1456,4 +1479,11 @@ FlySelfTest() {
         G.flyMon.Value := FileRead(out)
     } catch as e
         G.flyMon.Value := "Self-test couldn't run: " e.Message
+}
+
+FlyFeelings() {
+    out := ""
+    for n, v in S.flyFeel
+        out .= (out = "" ? "" : ",  ") n " " (v > 0 ? "+" : "") Round(v, 1) (v > 2 ? " (avoids!)" : "")
+    return out = "" ? "nobody yet" : out
 }

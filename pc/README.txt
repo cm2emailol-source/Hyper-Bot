@@ -47,6 +47,10 @@ Fly Brain mode (new)
   grooming neurons, mouth motor neurons = typing fly gibberish, max one message a minute).
   Turn it on: Moods & Camera tab > tick "Fly Brain" > Save, pick "Fly Brain" as the mood, press F8.
   It runs offline in fly\ with its own portable Python. It may run in slow motion on slower PCs.
+  Fly Learning: each player gets their own smell; mean words from them = punishment (PPL1 dopamine),
+  which weakens Kenyon cell -> approach-MBON synapses (rules, rates and bounds from arXiv 2611.09930).
+  The fly can learn to back away from that player, unlearn it, and remembers between sessions in
+  fly\fly_memory.npz (delete it to reset).
   Fly Brain tab: live monitor (spikes, active neurons, what it's doing) and a self-test.
 
 Credits: Fruit fly connectome: FlyWire Consortium (Dorkenwald et al. 2024, Schlegel et al. 2024, Nature).

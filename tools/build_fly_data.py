@@ -31,7 +31,7 @@ a["i"] = a.root_id.map(pos)
 def g(mask):
     return np.sort(a[mask].i.to_numpy().astype(np.int32))
 
-ct, sub, sc, side = a.cell_type.astype(str), a.cell_sub_class.astype(str), a.super_class.astype(str), a.side.astype(str)
+ct, sub, sc, side = (a[c].fillna("").astype(str) for c in ["cell_type", "cell_sub_class", "super_class", "side"])
 rng = np.random.default_rng(7)
 
 def sample(arr, n):
@@ -66,6 +66,54 @@ groups = {
     "mouth": g(sc == "motor"),           # proboscis / pharynx motor neurons -> "typing"
     "mn9": g(a.root_id == 720575940660219265),
 }
+# ---------------- Fly Learning (after "Specific, cumulative and reversible odour learning in a whole-brain
+# connectome model of Drosophila", arXiv 2611.09930): floor of 5 synapses, projection neuron -> Kenyon cell gain x8,
+# PPL1 dopamine = punishment, plastic Kenyon cell -> approach-MBON synapses.
+cc = a.cell_class.fillna("").astype(str)
+kc = g(cc == "Kenyon_Cell")
+pn = g(cc == "ALPN")
+mbon = g(cc == "MBON")
+ppl1 = g(ct.isin(["PPL101", "PPL102", "PPL103", "PPL104", "PPL105", "PPL106"]))
+pam = g(ct.str.startswith("PAM"))
+W.data[np.abs(W.data) < 5] = 0                      # 5-synapse floor
+W.eliminate_zeros()
+Wc = W.tocoo()
+pn_kc = np.isin(Wc.row, pn) & np.isin(Wc.col, kc)
+Wc.data[pn_kc] *= 8                                  # PN -> KC gain 8
+# antennal lobe local neurons -> inhibitory. The paper negated 44 excitatory local neurons; here every local
+# neuron predicted excitatory is made inhibitory (most real AL local neurons are GABA/glutamate), which restores
+# the paper's sparse odour code (5.5-8.9% of Kenyon cells per odour; ~6% here instead of ~90%).
+alln = g(cc == "ALLN")
+Wc.data[np.isin(Wc.row, alln)] = -np.abs(Wc.data[np.isin(Wc.row, alln)])
+W = sparse.csr_matrix((Wc.data, (Wc.row, Wc.col)), shape=(N, N))
+W.sum_duplicates()
+assert np.abs(W.data).max() < 32767
+# approach vs avoid MBONs: MBONs in PPL1 (punishment) compartments are the approach-side outputs that punishment
+# depresses; MBONs in PAM compartments are the avoid side. Compartment = where the dopamine neurons synapse.
+Wt = W.tocsc()
+def inputs_from(post, pres):
+    col = Wt[:, [post]]
+    return int(np.abs(col[pres].toarray()).sum())
+app, avoid = [], []
+for m in mbon:
+    p1, pa = inputs_from(m, ppl1), inputs_from(m, pam)
+    if p1 > pa and p1 > 0:
+        app.append(m)
+    elif pa > p1:
+        avoid.append(m)
+groups.update(kc=kc, pn=pn, ppl1=ppl1, pam=pam, mbon_app=np.array(app, np.int32), mbon_avoid=np.array(avoid, np.int32))
+# odours: one olfactory receptor neuron class each (DA1 = pheromone cVA, excluded like in the paper)
+orn_types = sorted(t for t in ct[cc == "olfactory"].unique()
+                   if t.startswith("ORN_") and t != "ORN_DA1")
+orn_types = [t for t in orn_types if len(g(ct == t)) >= 8]
+for t in orn_types:
+    groups["orn_" + t[4:]] = g(ct == t)
+groups["odour_names"] = np.array([t[4:] for t in orn_types])
+# plastic synapses: positions in the CSR data array where Kenyon cell -> approach MBON
+rows = np.repeat(np.arange(N), np.diff(W.indptr))
+plastic = np.flatnonzero(np.isin(rows, kc) & np.isin(W.indices, app))
+groups["plastic"] = plastic.astype(np.int64)
+
 for k, v in groups.items():
     print(f"{k:14s} {len(v)}")
 

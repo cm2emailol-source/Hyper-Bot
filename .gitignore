@@ -9,3 +9,4 @@ pc/fly/fly_data.npz
 pc/fly/io/
 pc/fly/python/
 __pycache__/
+pc/fly/fly_memory.npz
