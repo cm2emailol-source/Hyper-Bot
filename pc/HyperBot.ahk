@@ -20,7 +20,7 @@ CoordMode "Pixel", "Screen"
 SendMode "Event"
 SetKeyDelay 25, 30
 
-global VERSION := "1.0.0"
+global VERSION := "1.3.0"
 global RBX := "ahk_exe RobloxPlayerBeta.exe"
 global CFG_FILE := A_ScriptDir "\settings.ini"
 global MOVES_DIR := A_ScriptDir "\moves"
@@ -45,6 +45,7 @@ global DEFAULTS := Map(
     "waveOnReply", "1", "movesInAuto", "1", "mood", "normal", "enabledMoods", "chill,happy,sleepy,party,curious,silly",
     "moodLines", "1", "moodRotate", "0", "lookAround", "1", "shiftLock", "0", "camKeys", "arrows",
     "stuckOn", "1", "faceTalker", "1", "followName", "", "followSec", "60",
+    "flyExplore", "50",
     "chatX1", "0.00", "chatY1", "0.04", "chatX2", "0.32", "chatY2", "0.38", "ocrScale", "2"
 )
 global C := Map()
@@ -103,7 +104,7 @@ global S := {auto: false, listening: false, busyUntil: 0, lastChat: 0, lastIntro
     recording: false, recStart: 0, recEvents: [], recState: Map(), recentNames: [], lastRead: [],
     flyOn: false, flyPid: 0, flySound: 0, flyPraise: 0, flyInsult: 0, flyWater: 0, flyTouch: 0, flyWind: 0,
     flyPrev: "", flyLast: Map(), flyLastWord: -9999999, flyLastGroomChat: -9999999, flyStarted: 0,
-    flyOdour: 0, flyOdourSeq: 0, flyPunish: 0, flySmellOf: Map(), flyFeel: Map(), flyLastSpeaker: ""}
+    flyWallUntil: 0, flyOdour: 0, flyOdourSeq: 0, flyPunish: 0, flySmellOf: Map(), flyFeel: Map(), flyLastSpeaker: ""}
 global HELD := Map()
 global brain := ChatBrain()
 global smart := SmartBrain()
@@ -453,6 +454,8 @@ CheckStuck() {
     S.stuckCount := d / t.Length < 2.5 ? S.stuckCount + 1 : 0
     if S.stuckCount >= 2 && S.flyOn {
         S.stuckCount := 0, S.flyTouch += 1 ; the fly feels the wall - its own brain decides what to do
+        S.flyWallUntil := NowMs() + 1500 ; and, like a real fly, it can't walk forward through it
+        ReleaseAll()
         return
     }
     if S.stuckCount >= 2 {
@@ -1103,6 +1106,7 @@ BuildGui() {
             continue
         opt := (Mod(i, 4) = 0 ? "x24 y+8" : "x+16") " w110 " (InStr(en, "," m.id ",") ? "Checked" : "")
         G.moodChecks[m.id] := gw.AddCheckBox(opt, m.label)
+        G.moodChecks[m.id].OnEvent("Click", MoodTicked)
         i++
     }
     G.moodLines := gw.AddCheckBox("x24 y+14 " (On("moodLines") ? "Checked" : ""), "Use the mood's own chat lines and replies (mixed with yours)")
@@ -1155,6 +1159,9 @@ BuildGui() {
     gw.AddText("x24 y+8 w530", "How: tick 'Fly Brain' on the Moods && Camera tab, Save, pick it as the mood, then Auto (F8). "
         . "Listen turns on by itself so the fly can 'hear' chat. It runs in slow motion if your PC can't keep up - that's normal.")
     gw.SetFont("s10 norm c000000")
+    gw.AddText("x24 y+10", "Explore (left: marches more, right: turns more, marches less):")
+    G.flyExplore := gw.AddSlider("x24 y+4 w300 Range0-100 TickInterval25 ToolTip", Num("flyExplore"))
+    G.flyExplore.OnEvent("Change", (*) => (C["flyExplore"] := String(G.flyExplore.Value), IniWrite(C["flyExplore"], CFG_FILE, "bot", "flyExplore")))
     b := gw.AddButton("x24 y+10 w170", "Fly self-test")
     b.OnEvent("Click", (*) => FlySelfTest())
     G.flyMon := gw.AddEdit("x24 y+10 w530 h220 ReadOnly", "Fly Brain is off.")
@@ -1439,10 +1446,13 @@ FlyTick() {
         Hold("s", Min(1200, Round(600 / spd))), CamTurn(Random(0, 1) ? 1 : -1, 300), did.Push("backs away from " S.flyLastSpeaker " (learned)")
     else if backed
         Hold("s", Min(900, Round(450 / spd))), did.Push("moonwalk back (MDN)")
-    else if fwd > 0.3
+    else if now < S.flyWallUntil
+        did.Push("touching a wall (can't walk forward)")
+    else if fwd > 0.3 + Num("flyExplore") / 250
         Hold("w", Min(900, Round(220 / spd))), S.lastWalkAt := now, did.Push("walk " Round(fwd * 100) "%")
-    if Abs(turn) > 0.08
-        CamTurn(turn < 0 ? -1 : 1, Min(300, Round(Abs(turn) * 400))), did.Push("turn " (turn < 0 ? "left" : "right"))
+    gain := 500 + Num("flyExplore") * 8 ; Explore slider: stronger turns
+    if Abs(turn) > 0.05
+        CamTurn(turn < 0 ? -1 : 1, Min(700, Round(Abs(turn) * gain))), did.Push("turn " (turn < 0 ? "left" : "right"))
     if groomed {
         Hold("a", 110), SetTimer(Hold.Bind("d", 110), -150), did.Push("grooming")
         if now - S.flyLastGroomChat > 120000 && now - S.flyLastWord > 30000 && Random(1, 3) = 1
@@ -1486,4 +1496,14 @@ FlyFeelings() {
     for n, v in S.flyFeel
         out .= (out = "" ? "" : ",  ") n " " (v > 0 ? "+" : "") Round(v, 1) (v > 2 ? " (avoids!)" : "")
     return out = "" ? "nobody yet" : out
+}
+
+MoodTicked(*) {
+    en := ""
+    for id, cb in G.moodChecks
+        if cb.Value
+            en .= (en = "" ? "" : ",") id
+    C["enabledMoods"] := en
+    IniWrite(en, CFG_FILE, "bot", "enabledMoods")
+    SetMood(C["mood"])
 }
