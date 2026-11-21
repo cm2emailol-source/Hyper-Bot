@@ -45,7 +45,7 @@ global DEFAULTS := Map(
     "waveOnReply", "1", "movesInAuto", "1", "mood", "normal", "enabledMoods", "chill,happy,sleepy,party,curious,silly",
     "moodLines", "1", "moodRotate", "0", "lookAround", "1", "shiftLock", "0", "camKeys", "arrows",
     "stuckOn", "1", "faceTalker", "1", "followName", "", "followSec", "60",
-    "flyExplore", "50",
+    "flyExplore", "50", "syncIp", "", "syncCode", "",
     "chatX1", "0.00", "chatY1", "0.04", "chatX2", "0.32", "chatY2", "0.38", "ocrScale", "2"
 )
 global C := Map()
@@ -136,6 +136,7 @@ F8:: ToggleAuto()
 F9:: ToggleListen()
 F10:: StopAll()
 F11:: ToggleRecord()
+F7:: ToggleSync()
 ^F8:: FollowNearest()
 ^F10:: StopFollow(true)
 
@@ -1016,7 +1017,7 @@ BuildGui() {
     gw.SetFont("s9 norm c808080")
     gw.AddText("x+10 yp+9", "v" VERSION "  -  a friendly bot (always says it's a bot)  -  alt accounts only")
     gw.SetFont("s10 norm c000000")
-    tab := gw.AddTab3("x10 y44 w560 h500", ["Control", "Chat && Brain", "Moods && Camera", "Moves", "Fly Brain", "About"])
+    tab := gw.AddTab3("x10 y44 w560 h500", ["Control", "Chat && Brain", "Moods && Camera", "Moves", "Fly Brain", "Sync", "About"])
 
     ; --- Control
     tab.UseTab(1)
@@ -1166,8 +1167,30 @@ BuildGui() {
     b.OnEvent("Click", (*) => FlySelfTest())
     G.flyMon := gw.AddEdit("x24 y+10 w530 h220 ReadOnly", "Fly Brain is off.")
 
-    ; --- About
+    ; --- Sync (Shadow clone)
     tab.UseTab(6)
+    gw.SetFont("s10 bold c" CYAN)
+    gw.AddText("x24 y82", "Shadow clone - your tablet's account copies your moves")
+    gw.SetFont("s9 norm c404040")
+    gw.AddText("x24 y+6 w530", "Play your main here normally. While Send is on and Roblox is the active window, Hyper-Bot sends ONLY "
+        . "which of these keys you hold - W A S D Space Left Right - to your tablet on your home Wi-Fi, and the tablet's account copies them. "
+        . "Nothing else is read or sent: no chat, no mouse, no other windows. Your main stays played by you.")
+    gw.AddText("x24 y+6 w530", "On this PC with your main, use only this tab - don't turn on Auto, Listen or Fly Brain for your main.")
+    gw.SetFont("s10 norm c000000")
+    gw.AddText("x24 y+12", "Tablet address (shown in the Android app):")
+    G.syncIp := gw.AddEdit("x+8 yp-3 w150", C["syncIp"])
+    gw.AddText("x24 y+12", "Pairing code (same as in the Android app):")
+    G.syncCode := gw.AddEdit("x+8 yp-3 w90 Number", C["syncCode"])
+    G.syncOn := gw.AddButton("x24 y+14 w220 h34", "Send: OFF (F7)")
+    G.syncOn.OnEvent("Click", (*) => ToggleSync())
+    G.syncState := gw.AddText("x24 y+10 w530 c808080", "Not sending.")
+    gw.SetFont("s8 c808080")
+    gw.AddText("x24 y+8 w530", "Tips: both accounts face the same way = they move the same way (the tablet copies keys relative to its own camera). "
+        . "Leave the address empty to broadcast to your whole home network instead. If nothing happens, allow Hyper-Bot in Windows Firewall.")
+    gw.SetFont("s10 norm c000000")
+
+    ; --- About
+    tab.UseTab(7)
     gw.AddEdit("x24 y82 w530 h400 ReadOnly",
         "Hyper-Bot PC " VERSION "`r`n`r`n"
         . "How it works: it only presses keys, moves the mouse and reads the screen with Windows' built-in OCR - like a player. "
@@ -1506,4 +1529,67 @@ MoodTicked(*) {
     C["enabledMoods"] := en
     IniWrite(en, CFG_FILE, "bot", "enabledMoods")
     SetMood(C["mood"])
+}
+
+; ------------------------------------------------------------------ Shadow clone sender (UDP, home Wi-Fi only)
+
+global SYNC := {on: false, sock: 0, addr: 0, seq: 0, sent: 0, lastKeys: ""}
+
+ToggleSync() {
+    if SYNC.on
+        return StopSync()
+    ip := Trim(G.syncIp.Value), code := Trim(G.syncCode.Value)
+    if StrLen(code) < 4
+        return Status("Sync: type the pairing code from the Android app (4+ digits)")
+    if ip != "" && !RegExMatch(ip, "^(192\.168|10)\.\d{1,3}\.\d{1,3}(\.\d{1,3})?$|^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$")
+        return Status("Sync: that isn't a home-network address (it should start with 192.168. or 10.)")
+    C["syncIp"] := ip, C["syncCode"] := code
+    SaveCfg()
+    wsa := Buffer(408, 0)
+    DllCall("ws2_32\WSAStartup", "ushort", 0x0202, "ptr", wsa)
+    sock := DllCall("ws2_32\socket", "int", 2, "int", 2, "int", 17, "ptr")
+    if sock = -1 || sock = 0
+        return Status("Sync: couldn't open a network socket")
+    one := Buffer(4, 0), NumPut("int", 1, one)
+    DllCall("ws2_32\setsockopt", "ptr", sock, "int", 0xFFFF, "int", 0x0020, "ptr", one, "int", 4) ; SO_BROADCAST
+    addr := Buffer(16, 0)
+    NumPut("ushort", 2, addr, 0)
+    NumPut("ushort", DllCall("ws2_32\htons", "ushort", 47474, "ushort"), addr, 2)
+    NumPut("uint", DllCall("ws2_32\inet_addr", "astr", ip = "" ? "255.255.255.255" : ip, "uint"), addr, 4)
+    SYNC.sock := sock, SYNC.addr := addr, SYNC.on := true, SYNC.sent := 0
+    SetTimer(SyncTick, 50)
+    G.syncOn.Text := "Send: ON (F7)"
+    Status("Shadow clone: sending to " (ip = "" ? "the home network" : ip))
+}
+
+StopSync() {
+    if !SYNC.on
+        return
+    SyncSend("0000000")
+    SetTimer(SyncTick, 0)
+    DllCall("ws2_32\closesocket", "ptr", SYNC.sock)
+    SYNC.on := false
+    G.syncOn.Text := "Send: OFF (F7)"
+    G.syncState.Text := "Not sending."
+}
+
+SyncSend(keys) {
+    SYNC.seq += 1
+    msg := "HB1|" C["syncCode"] "|" SYNC.seq "|" keys
+    buf := Buffer(StrPut(msg, "UTF-8"))
+    n := StrPut(msg, buf, "UTF-8") - 1
+    if DllCall("ws2_32\sendto", "ptr", SYNC.sock, "ptr", buf, "int", n, "int", 0, "ptr", SYNC.addr, "int", 16) > 0
+        SYNC.sent += 1
+}
+
+SyncTick() {
+    keys := ""
+    if RbxActive() { ; only while Roblox is the active window - never sends anything typed elsewhere
+        for k in ["w", "a", "s", "d", "Space", "Left", "Right"]
+            keys .= GetKeyState(k, "P") ? "1" : "0"
+    } else
+        keys := "0000000"
+    SyncSend(keys)
+    if Mod(SYNC.seq, 20) = 0
+        G.syncState.Text := "Sending " keys " - " SYNC.sent " packets so far" (RbxActive() ? "" : "  (paused: Roblox isn't the active window)")
 }

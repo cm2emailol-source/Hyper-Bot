@@ -26,6 +26,7 @@ class MainActivity : Activity() {
     private lateinit var movesBox: LinearLayout
     private lateinit var botNameEdit: EditText
     private lateinit var followEdit: EditText
+    private lateinit var syncEdit: EditText
     private lateinit var qaEdit: EditText
     private lateinit var repliesEdit: EditText
     private lateinit var waveBox: CheckBox
@@ -208,6 +209,16 @@ class MainActivity : Activity() {
             "The bot tells them it's a bot following them and turns Listen on; if they say stop / go away it stops, " +
             "says sorry and won't follow them again for an hour. It can only follow someone it can see on screen.", 13f))
 
+        col.addView(label("Shadow clone (copies your PC)", 17f, Color.rgb(0, 150, 230)))
+        col.addView(label(
+            "Play your main on the PC; this tablet's account copies your moves (WASD, jump, arrow-key camera) live over your home Wi-Fi. " +
+            "In Hyper-Bot PC open the Sync tab, type this tablet's address and the code below, tick Send. Then tap Clone in the bubble. " +
+            "The app only LISTENS on your home network: it never sends anything and ignores anything without your code.", 13f))
+        col.addView(label("This tablet's address: " + CloneLink.localIp() + "    port " + CloneLink.PORT, 14f, Color.BLACK))
+        col.addView(label("Pairing code:", 13f))
+        syncEdit = EditText(this).apply { setText(prefs.syncCode); setSingleLine(); inputType = android.text.InputType.TYPE_CLASS_NUMBER }
+        col.addView(syncEdit)
+
         col.addView(label("Vision lite", 17f, Color.rgb(0, 150, 230)))
         col.addView(CheckBox(this).apply {
             text = "Turn to face people who talk to it"
@@ -250,6 +261,7 @@ class MainActivity : Activity() {
 
     private fun save() {
         prefs.followName = followEdit.text.toString()
+        if (syncEdit.text.toString().length >= 4) prefs.syncCode = syncEdit.text.toString()
         prefs.customQaText = qaEdit.text.toString()
         prefs.intro = introEdit.text.toString()
         prefs.linesText = linesEdit.text.toString()

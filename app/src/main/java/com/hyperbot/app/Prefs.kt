@@ -114,6 +114,11 @@ class Prefs(ctx: Context) {
             if (i <= 0) null else Pair(it.substring(0, i).trim(), it.substring(i + 2).trim()).takeIf { p -> p.first.isNotEmpty() && p.second.isNotEmpty() }
         }
 
+    /** Shadow clone pairing code (must match Hyper-Bot PC). */
+    var syncCode: String
+        get() = p.getString("syncCode", null) ?: (1000..9999).random().toString().also { syncCode = it }
+        set(v) = p.edit().putString("syncCode", v.filter { it.isDigit() }.take(6)).apply()
+
     var commandsOn: Boolean
         get() = p.getBoolean("commandsOn", true)
         set(v) = p.edit().putBoolean("commandsOn", v).apply()

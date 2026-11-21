@@ -88,6 +88,7 @@ class BotService : AccessibilityService() {
     override fun onDestroy() {
         stopAuto()
         stopListening()
+        stopClone()
         try { recognizer?.close() } catch (_: Exception) {}
         removeAllViews()
         instance = null
@@ -218,13 +219,14 @@ class BotService : AccessibilityService() {
         addButton(p, "Chat test") { sendChat("Hyper-Bot chat test (I'm a bot)", test = true) }
         addButton(p, "Mood: " + mood().label) { showMoodPanel() }
         addButton(p, if (followTarget != null) "Following: $followTarget" else "Follow...") { showFollowPanel() }
+        cloneButton = addButton(p, cloneLabel(), Color.rgb(120, 60, 200)) { toggleClone() }
         addButton(p, "Look around") { lookAround() }
         shiftButtonView = addButton(p, shiftLabel()) { toggleShiftLock() }
         addButton(p, "Moves") { showMovesPanel() }
         listenButton = addButton(p, listenLabel()) { toggleListen() }
         addButton(p, "Listen test") { readChat(true) }
         addButton(p, if (markers.isEmpty()) "Calibrate" else "Save calibration") { toggleCalibration() }
-        addButton(p, "STOP", Color.rgb(200, 40, 40)) { stopAuto(); stopFollow(); hidePanel(); toast("Hyper-Bot stopped") }
+        addButton(p, "STOP", Color.rgb(200, 40, 40)) { stopAuto(); stopFollow(); stopClone(); hidePanel(); toast("Hyper-Bot stopped") }
 
         val blp = bubbleLp ?: return
         val lp = overlayParams(
@@ -241,6 +243,115 @@ class BotService : AccessibilityService() {
         autoButton = null
         listenButton = null
         shiftButtonView = null
+        cloneButton = null
+    }
+
+    // ---------------------------------------------------------------- Shadow clone (copies Hyper-Bot PC)
+
+    private var clone: CloneLink? = null
+    private var cloneButton: Button? = null
+    private var joyStroke: GestureDescription.StrokeDescription? = null
+    private var joyEndX = 0f
+    private var joyEndY = 0f
+    private var lastKeys = "0000000"
+    private val cloneWatchdog = Runnable { applyKeys("0000000") }
+
+    private fun cloneLabel() = if (clone != null) "Clone: ON" else "Clone: OFF"
+
+    private fun toggleClone() {
+        if (clone != null) stopClone() else startClone()
+        cloneButton?.text = cloneLabel()
+    }
+
+    private fun startClone() {
+        stopAuto()
+        stopFollow()
+        clone = CloneLink(this, prefs.syncCode) { keys -> applyKeys(keys) }.also { it.start() }
+        toast("Shadow clone ON - code ${prefs.syncCode}, this tablet: ${CloneLink.localIp()}")
+    }
+
+    fun stopClone() {
+        clone?.stop()
+        clone = null
+        applyKeys("0000000")
+        cloneButton?.text = cloneLabel()
+    }
+
+    /** keys = w a s d space left right. Only updates what the clone wants; segments are chained by cloneStep(). */
+    private var wantDx = 0
+    private var wantDy = 0
+    private var pendingJump = false
+    private var camDir = 0
+    private var inFlight = false
+
+    private fun applyKeys(keys: String) {
+        if (keys.length < 7) return
+        h.removeCallbacks(cloneWatchdog)
+        if (keys != "0000000") h.postDelayed(cloneWatchdog, 400) // PC went quiet -> let go
+        val k = keys.map { it == '1' }
+        wantDx = (if (k[3]) 1 else 0) - (if (k[1]) 1 else 0)
+        wantDy = (if (k[2]) 1 else 0) - (if (k[0]) 1 else 0)
+        if (k[4] && lastKeys.getOrNull(4) != '1') pendingJump = true
+        camDir = if (k[5]) -1 else if (k[6]) 1 else 0
+        lastKeys = keys
+        if (!inFlight) cloneStep()
+    }
+
+    /** One 100 ms gesture: joystick held (continued from the last segment) + any jump tap / camera swipe.
+     *  The next segment starts when this one completes, so the joystick finger never lifts while moving. */
+    private fun cloneStep() {
+        val moving = wantDx != 0 || wantDy != 0
+        if (!moving && !pendingJump && camDir == 0 && joyStroke == null) return
+        val b = GestureDescription.Builder()
+        val (cx, cy) = pos("JOY")
+        if (moving) {
+            val a = atan2(wantDy.toDouble(), wantDx.toDouble())
+            val r = dp(60).toFloat()
+            val tx = cx + (cos(a) * r).toFloat()
+            val ty = cy + (sin(a) * r).toFloat()
+            val prev = joyStroke
+            val path = Path()
+            val st = if (prev == null) {
+                path.moveTo(cx, cy); path.lineTo(tx, ty)
+                GestureDescription.StrokeDescription(path, 0, 100, true)
+            } else {
+                path.moveTo(joyEndX, joyEndY); path.lineTo(tx, ty)
+                prev.continueStroke(path, 0, 100, true)
+            }
+            joyStroke = st
+            joyEndX = tx; joyEndY = ty
+            b.addStroke(st)
+            lastWalkAt = System.currentTimeMillis()
+        } else joyStroke?.let { prev ->                       // let go of the joystick
+            b.addStroke(prev.continueStroke(Path().apply { moveTo(joyEndX, joyEndY); lineTo(joyEndX, joyEndY) }, 0, 20, false))
+            joyStroke = null
+        }
+        if (pendingJump) {
+            val (jx, jy) = pos("JUMP")
+            b.addStroke(GestureDescription.StrokeDescription(Path().apply { moveTo(jx, jy); lineTo(jx, jy) }, 0, 60))
+            pendingJump = false
+        }
+        if (camDir != 0) {
+            val (mx, my) = pos("CAM")
+            val d = screenW() * 0.04f * camDir
+            b.addStroke(GestureDescription.StrokeDescription(Path().apply { moveTo(mx, my); lineTo(mx + d, my) }, 0, 100))
+        }
+        inFlight = true
+        val ok = dispatchGesture(b.build(), object : GestureResultCallback() {
+            override fun onCompleted(gestureDescription: GestureDescription?) {
+                inFlight = false
+                if (clone != null || joyStroke != null) cloneStep()
+            }
+
+            override fun onCancelled(gestureDescription: GestureDescription?) {
+                inFlight = false
+                joyStroke = null // next segment starts a fresh press
+            }
+        }, null)
+        if (!ok) {
+            inFlight = false
+            joyStroke = null
+        }
     }
 
     // ---------------------------------------------------------------- moods
