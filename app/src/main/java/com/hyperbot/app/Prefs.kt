@@ -29,6 +29,10 @@ class Prefs(ctx: Context) {
         get() = p.getBoolean("chatOn", true)
         set(v) = p.edit().putBoolean("chatOn", v).apply()
 
+    var lastChatDiag: String
+        get() = p.getString("lastChatDiag", "") ?: ""
+        set(v) = p.edit().putString("lastChatDiag", v).apply()
+
     var emotesOn: Boolean
         get() = p.getBoolean("emotesOn", true)
         set(v) = p.edit().putBoolean("emotesOn", v).apply()

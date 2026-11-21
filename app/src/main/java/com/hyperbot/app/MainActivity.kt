@@ -21,6 +21,7 @@ class MainActivity : Activity() {
 
     private lateinit var prefs: Prefs
     private lateinit var status: TextView
+    private lateinit var chatDiag: TextView
     private lateinit var introEdit: EditText
     private lateinit var linesEdit: EditText
     private lateinit var intervalEdit: EditText
@@ -101,6 +102,10 @@ class MainActivity : Activity() {
             13f
         ))
 
+        col.addView(label("Last chat test (screenshot this if chat doesn't work):", 15f, Color.BLACK))
+        chatDiag = label("", 12f)
+        col.addView(chatDiag)
+
         setContentView(ScrollView(this).apply { addView(col) })
     }
 
@@ -109,6 +114,7 @@ class MainActivity : Activity() {
         val on = BotService.instance != null
         status.text = if (on) "Status: service ON" else "Status: service OFF - do step 1"
         status.setTextColor(if (on) Color.rgb(0, 140, 60) else Color.rgb(200, 40, 40))
+        chatDiag.text = prefs.lastChatDiag.ifEmpty { "(none yet - tap the bubble > Chat test in Roblox)" }
     }
 
     private fun save() {

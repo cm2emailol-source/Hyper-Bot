@@ -3,6 +3,8 @@ package com.hyperbot.app
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.annotation.SuppressLint
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.graphics.Color
 import android.graphics.Path
 import android.graphics.PixelFormat
@@ -19,6 +21,7 @@ import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -202,6 +205,7 @@ class BotService : AccessibilityService() {
         addButton(p, "Emote") { emoteRandom(force = true) }
         addButton(p, "Say a line") { sayRandomLine(force = true) }
         addButton(p, "Say intro") { sendChat(prefs.safeIntro()) }
+        addButton(p, "Chat test") { sendChat("Hyper-Bot chat test (I'm a bot)", test = true) }
         addButton(p, if (markers.isEmpty()) "Calibrate" else "Save calibration") { toggleCalibration() }
         addButton(p, "STOP", Color.rgb(200, 40, 40)) { stopAuto(); hidePanel(); toast("Hyper-Bot stopped") }
 
@@ -246,6 +250,8 @@ class BotService : AccessibilityService() {
         bubble?.let { try { wm.removeView(it) } catch (_: Exception) {} }
         bubble = null
         for ((_, m) in markers) try { wm.removeView(m.first) } catch (_: Exception) {}
+        diagView?.let { try { wm.removeView(it) } catch (_: Exception) {} }
+        diagView = null
         markers.clear()
     }
 
@@ -317,36 +323,70 @@ class BotService : AccessibilityService() {
 
     // ---------------------------------------------------------------- chat
 
-    /** Opens chat, types the text into the focused chat box and sends it. */
-    fun sendChat(text: String) {
+    /** Step-by-step record of the last chat attempt (shown by "Chat test", saved for the app screen). */
+    private var diag = StringBuilder()
+
+    /** Opens chat, types the text into Roblox's chat box and sends it. */
+    fun sendChat(text: String, test: Boolean = false) {
         val now = System.currentTimeMillis()
-        if (now < busyUntil) return
-        busyUntil = now + 3500
+        if (now < busyUntil && !test) return
+        busyUntil = now + 4500
+        diag = StringBuilder()
+        diag.append("text: \"").append(text).append("\"\n")
         val (cx, cy) = pos("CHAT")
         val (bx, by) = pos("BOX")
+        diag.append("tap CHAT at ${cx.toInt()},${cy.toInt()} then BOX at ${bx.toInt()},${by.toInt()}\n")
         tap(cx, cy)
         h.postDelayed({ tap(bx, by) }, 700)
         h.postDelayed({
-            if (!setFocusedText(text)) {
-                toast("Hyper-Bot: chat box not found - calibrate CHAT and BOX")
+            val node = findChatBox()
+            if (node == null || !typeInto(node, text)) {
+                report("FAILED - could not type into the chat box", true)
                 return@postDelayed
             }
             h.postDelayed({
-                if (!pressEnter()) {
+                if (pressEnter(node)) {
+                    diag.append("send: keyboard Enter\n")
+                } else {
                     val (sx, sy) = pos("SEND")
                     tap(sx, sy)
+                    diag.append("send: tapped SEND at ${sx.toInt()},${sy.toInt()}\n")
                 }
-            }, 400)
-        }, 1500)
+                report("done - check whether the message appeared in chat", test)
+            }, 450)
+        }, 1700)
     }
 
-    private fun setFocusedText(text: String): Boolean {
-        val root = rootInActiveWindow ?: return false
-        val node = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: findEditable(root) ?: return false
-        val args = Bundle().apply {
-            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+    /** Looks through every window (not just the active one: the keyboard can be the active window). */
+    private fun findChatBox(): AccessibilityNodeInfo? {
+        val roots = mutableListOf<AccessibilityNodeInfo>()
+        try {
+            for (w in windows) {
+                val r = w.root ?: continue
+                val isKeyboard = w.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD
+                diag.append("window: ${r.packageName}${if (isKeyboard) " (keyboard)" else ""}\n")
+                if (!isKeyboard && r.packageName != packageName) roots.add(r)
+            }
+        } catch (e: Exception) {
+            diag.append("windows list error: ${e.message}\n")
         }
-        return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        rootInActiveWindow?.let { if (it.packageName != packageName && roots.none { r -> r == it }) roots.add(it) }
+        for (r in roots) {
+            val f = r.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+            if (f != null) {
+                diag.append("focused input: ${f.className} (${f.packageName}) editable=${f.isEditable}\n")
+                if (f.isEditable) return f
+            }
+        }
+        for (r in roots) {
+            val e = findEditable(r)
+            if (e != null) {
+                diag.append("editable box: ${e.className} (${e.packageName})\n")
+                return e
+            }
+        }
+        diag.append("no editable text box found in any window\n")
+        return null
     }
 
     private fun findEditable(n: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
@@ -359,10 +399,63 @@ class BotService : AccessibilityService() {
         return null
     }
 
-    private fun pressEnter(): Boolean {
+    /** Sets the text directly; if Roblox refuses, pastes it from the clipboard instead. */
+    private fun typeInto(node: AccessibilityNodeInfo, text: String): Boolean {
+        val args = Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+        }
+        if (node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
+            diag.append("typed: set text OK\n")
+            return true
+        }
+        diag.append("set text refused, trying paste\n")
+        try {
+            val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+            cm.setPrimaryClip(ClipData.newPlainText("Hyper-Bot", text))
+        } catch (e: Exception) {
+            diag.append("clipboard error: ${e.message}\n")
+            return false
+        }
+        node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+        if (node.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
+            diag.append("typed: paste OK\n")
+            return true
+        }
+        diag.append("paste refused\n")
+        return false
+    }
+
+    private fun pressEnter(node: AccessibilityNodeInfo): Boolean {
         if (Build.VERSION.SDK_INT < 30) return false
-        val node = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return false
         return node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
+    }
+
+    private fun report(result: String, show: Boolean) {
+        diag.append("result: ").append(result).append("\n")
+        prefs.lastChatDiag = diag.toString()
+        if (show) showDiag(diag.toString()) else if (result.startsWith("FAILED")) toast("Hyper-Bot: chat failed - use Chat test for details")
+    }
+
+    private var diagView: TextView? = null
+
+    /** On-screen report of the chat attempt. Tap it to close (it also closes after 25 s). */
+    private fun showDiag(text: String) {
+        diagView?.let { try { wm.removeView(it) } catch (_: Exception) {} }
+        val v = TextView(this).apply {
+            this.text = "Hyper-Bot chat test (tap to close)\n\n$text"
+            textSize = 12f
+            setTextColor(Color.WHITE)
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = round(DARK, 10, CYAN)
+        }
+        val lp = overlayParams(
+            (screenW() * 0.55f).toInt(), WindowManager.LayoutParams.WRAP_CONTENT,
+            (screenW() * 0.4f).toInt(), dp(16)
+        )
+        v.setOnClickListener { try { wm.removeView(v) } catch (_: Exception) {}; diagView = null }
+        wm.addView(v, lp)
+        diagView = v
+        h.postDelayed({ if (diagView === v) { try { wm.removeView(v) } catch (_: Exception) {}; diagView = null } }, 25_000)
     }
 
     fun sayRandomLine(force: Boolean = false) {
