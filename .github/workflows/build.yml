@@ -59,8 +59,11 @@ jobs:
 
       - name: Get AutoHotkey v2
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          Invoke-WebRequest https://www.autohotkey.com/download/ahk-v2.zip -OutFile ahk.zip
+          # official AutoHotkey releases on GitHub (latest stable v2)
+          gh release download --repo AutoHotkey/AutoHotkey --pattern "AutoHotkey_2*.zip" --output ahk.zip
           Expand-Archive ahk.zip -DestinationPath ahk
           Get-ChildItem ahk | Select-Object Name
 
