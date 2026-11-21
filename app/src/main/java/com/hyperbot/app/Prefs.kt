@@ -45,6 +45,17 @@ class Prefs(ctx: Context) {
     val replyLines: List<String>
         get() = replyLinesText.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
 
+    var stuckOn: Boolean
+        get() = p.getBoolean("stuckOn", true)
+        set(v) = p.edit().putBoolean("stuckOn", v).apply()
+
+    var faceTalker: Boolean
+        get() = p.getBoolean("faceTalker", true)
+        set(v) = p.edit().putBoolean("faceTalker", v).apply()
+
+    /** Max seconds to follow someone who said "bot follow me". */
+    val followSec: Int get() = 60
+
     var commandsOn: Boolean
         get() = p.getBoolean("commandsOn", true)
         set(v) = p.edit().putBoolean("commandsOn", v).apply()

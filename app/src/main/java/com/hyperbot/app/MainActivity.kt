@@ -128,6 +128,7 @@ class MainActivity : Activity() {
         })
         col.addView(label(
             "Commands: bot help, bot hi, bot wave / dance / cheer / laugh / point, bot jump, bot walk, " +
+            "bot follow me (follows only that player, max 60 s), bot stop, " +
             "bot <move name> (plays your saved move). Most are silent actions. Limits: 1 command per 5 s, " +
             "each person every 15 s, 8 per minute.", 13f))
         col.addView(label(
@@ -135,6 +136,21 @@ class MainActivity : Activity() {
             "Max one reply every 12 s, one per person per minute, 4 per minute. Chat is read from the screen in memory only - " +
             "nothing is saved or sent. In Roblox: Calibrate, put LOG1 / LOG2 on the corners of the chat messages, then use " +
             "Listen test and Listen: ON in the bubble.", 13f))
+
+        col.addView(label("Vision lite", 17f, Color.rgb(0, 150, 230)))
+        col.addView(CheckBox(this).apply {
+            text = "Turn to face people who talk to it"
+            isChecked = prefs.faceTalker
+            setOnCheckedChangeListener { _, c -> prefs.faceTalker = c }
+        })
+        col.addView(CheckBox(this).apply {
+            text = "Stuck detection (turn around when walking into walls)"
+            isChecked = prefs.stuckOn
+            setOnCheckedChangeListener { _, c -> prefs.stuckOn = c }
+        })
+        col.addView(label(
+            "Vision finds players by the name tag above their head, so name tags must be visible. " +
+            "It takes about one screenshot per second only while Listen, Auto or Follow is on; nothing is saved.", 13f))
 
         col.addView(label("Moves (record them in Roblox: bubble > Moves > + Record new move):", 15f, Color.BLACK))
         col.addView(CheckBox(this).apply {

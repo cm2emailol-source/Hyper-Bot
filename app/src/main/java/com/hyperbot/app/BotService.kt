@@ -30,6 +30,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import kotlin.math.abs
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 import com.google.mlkit.vision.common.InputImage
@@ -219,7 +220,7 @@ class BotService : AccessibilityService() {
         listenButton = addButton(p, listenLabel()) { toggleListen() }
         addButton(p, "Listen test") { readChat(true) }
         addButton(p, if (markers.isEmpty()) "Calibrate" else "Save calibration") { toggleCalibration() }
-        addButton(p, "STOP", Color.rgb(200, 40, 40)) { stopAuto(); hidePanel(); toast("Hyper-Bot stopped") }
+        addButton(p, "STOP", Color.rgb(200, 40, 40)) { stopAuto(); stopFollow(); hidePanel(); toast("Hyper-Bot stopped") }
 
         val blp = bubbleLp ?: return
         val lp = overlayParams(
@@ -349,6 +350,8 @@ class BotService : AccessibilityService() {
             null, null
         )
         busyUntil = System.currentTimeMillis() + ms + 150
+        lastWalkAt = System.currentTimeMillis()
+        lastWalkAngle = a2
     }
 
     // ---------------------------------------------------------------- moves: playback
@@ -849,33 +852,67 @@ class BotService : AccessibilityService() {
         }
         listening = true
         brain.reset()
-        lh.post(listenTick)
+        ensureVision()
         toast("Hyper-Bot: listening to chat")
     }
 
     private fun stopListening() {
         listening = false
         chatQueue.clear()
-        lh.removeCallbacksAndMessages(null)
         listenButton?.text = listenLabel()
     }
 
-    private val listenTick = object : Runnable {
+    // ---- shared vision timer: about one screenshot every 1.2 s (Android allows ~1/s),
+    //      shared by Listen (every 2nd tick), Follow, Face and Stuck detection. Idle = no screenshots.
+
+    private var visionRunning = false
+    private var visionCount = 0
+    private var shotBusy = false
+    private var lastShot = 0L
+    private var testPending = false
+
+    private fun ensureVision() {
+        if (visionRunning || Build.VERSION.SDK_INT < 30) return
+        visionRunning = true
+        lh.post(visionTick)
+    }
+
+    private val visionTick = object : Runnable {
         override fun run() {
-            if (!listening) return
-            if (System.currentTimeMillis() >= busyUntil && recLayer == null) readChat(false)
-            lh.postDelayed(this, 2500)
+            val now = System.currentTimeMillis()
+            visionCount++
+            val test = testPending
+            val needChat = test || (listening && visionCount % 2 == 0 && now >= busyUntil && recLayer == null)
+            val needTags = followTarget != null || faceTarget != null
+            val needStuck = prefs.stuckOn && (auto || followTarget != null) && recLayer == null
+            if (needChat || needTags || needStuck) {
+                capture { bmp ->
+                    if (needStuck) checkStuck(bmp)
+                    if (needTags) seekTags(bmp)
+                    if (needChat) {
+                        testPending = false
+                        ocrChat(bmp, test)
+                    }
+                }
+            }
+            if (listening || auto || followTarget != null || faceTarget != null || testPending) {
+                lh.postDelayed(this, 1200)
+            } else {
+                visionRunning = false
+            }
         }
     }
 
-    /** Screenshot (Android 11+, no extra permission for accessibility services), then read the chat area. */
-    private fun readChat(test: Boolean) {
-        if (Build.VERSION.SDK_INT < 30) {
-            if (test) showDiag("Listening needs Android 11 or newer")
-            return
-        }
+    /** Screenshot (Android 11+, no extra permission for accessibility services). */
+    private fun capture(onShot: (Bitmap) -> Unit) {
+        if (Build.VERSION.SDK_INT < 30) return
+        val now = System.currentTimeMillis()
+        if (shotBusy || now - lastShot < 1050) return
+        shotBusy = true
+        lastShot = now
         takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : AccessibilityService.TakeScreenshotCallback {
             override fun onSuccess(result: AccessibilityService.ScreenshotResult) {
+                shotBusy = false
                 var bmp: Bitmap? = null
                 try {
                     val hw = Bitmap.wrapHardwareBuffer(result.hardwareBuffer, result.colorSpace)
@@ -885,19 +922,189 @@ class BotService : AccessibilityService() {
                 } finally {
                     try { result.hardwareBuffer.close() } catch (_: Exception) {}
                 }
-                val b = bmp
-                if (b == null) {
-                    if (test) showDiag("Listen test: screenshot failed")
-                    return
-                }
-                ocrChat(b, test)
+                bmp?.let(onShot)
             }
 
             override fun onFailure(errorCode: Int) {
-                if (test) showDiag("Listen test: screenshot failed (code $errorCode). Try again in a second.")
+                shotBusy = false
             }
         })
     }
+
+    /** Listen test: reads the chat once, on the next vision tick. */
+    private fun readChat(test: Boolean) {
+        if (Build.VERSION.SDK_INT < 30) {
+            if (test) showDiag("Listening needs Android 11 or newer")
+            return
+        }
+        if (test) testPending = true
+        ensureVision()
+    }
+
+    // ---------------------------------------------------------------- vision lite: follow, face, stuck
+
+    private var followTarget: String? = null
+    private var followUntil = 0L
+    private var followLost = 0
+    private var faceTarget: String? = null
+    private var faceUntil = 0L
+    private var lastWalkAt = 0L
+    private var lastWalkAngle = 0.0
+    private var prevThumb: IntArray? = null
+    private var stuckCount = 0
+
+    /** Follows ONLY the player who asked ("bot follow me"), for a limited time. "bot stop" ends it. */
+    fun startFollow(name: String) {
+        followTarget = name
+        followUntil = System.currentTimeMillis() + prefs.followSec * 1000L
+        followLost = 0
+        ensureVision()
+    }
+
+    fun stopFollow() {
+        followTarget = null
+    }
+
+    /** Small joystick nudge towards someone who talked to the bot, so it turns to face them. */
+    fun faceToward(name: String) {
+        if (!prefs.faceTalker || followTarget != null) return
+        faceTarget = name
+        faceUntil = System.currentTimeMillis() + 4000
+        ensureVision()
+    }
+
+    private fun normName(s: String) = s.lowercase().filter { it.isLetterOrDigit() }
+
+    private fun levenshtein(a: String, b: String): Int {
+        val dp = IntArray(b.length + 1) { it }
+        for (i in 1..a.length) {
+            var prev = dp[0]
+            dp[0] = i
+            for (j in 1..b.length) {
+                val tmp = dp[j]
+                dp[j] = minOf(dp[j] + 1, dp[j - 1] + 1, prev + if (a[i - 1] == b[j - 1]) 0 else 1)
+                prev = tmp
+            }
+        }
+        return dp[b.length]
+    }
+
+    private fun similar(a: String, b: String): Boolean {
+        if (a.isEmpty() || b.isEmpty()) return false
+        if (a.length < 3 || b.length < 3) return a == b
+        if (a == b || a.contains(b) || b.contains(a)) return true
+        return 1.0 - levenshtein(a, b).toDouble() / maxOf(a.length, b.length) >= 0.75
+    }
+
+    /** Reads the whole screen (outside the chat area) and looks for the target's name tag above their head. */
+    private fun seekTags(bmp: Bitmap) {
+        val now = System.currentTimeMillis()
+        if (followTarget != null && now > followUntil) {
+            followTarget = null
+            toast("Hyper-Bot: done following")
+            return
+        }
+        if (faceTarget != null && now > faceUntil) faceTarget = null
+        val target = followTarget ?: faceTarget ?: return
+        val scale = minOf(1f, 1280f / bmp.width)
+        val img = if (scale < 1f) Bitmap.createScaledBitmap(bmp, (bmp.width * scale).toInt(), (bmp.height * scale).toInt(), true) else bmp
+        val (lx1, ly1) = prefs.point("LOG1")
+        val (lx2, ly2) = prefs.point("LOG2")
+        val want = normName(target)
+        val rec = recognizer ?: TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS).also { recognizer = it }
+        rec.process(InputImage.fromBitmap(img, 0)).addOnSuccessListener { text ->
+            var best: Rect? = null
+            for (block in text.textBlocks) {
+                for (line in block.lines) {
+                    val box = line.boundingBox ?: continue
+                    val fx = box.exactCenterX() / img.width
+                    val fy = box.exactCenterY() / img.height
+                    val inChat = fx in minOf(lx1, lx2)..maxOf(lx1, lx2) && fy in minOf(ly1, ly2)..maxOf(ly1, ly2)
+                    if (!inChat && similar(normName(line.text), want)) {
+                        best = box
+                        break
+                    }
+                }
+                if (best != null) break
+            }
+            val b = best
+            if (b == null) {
+                if (followTarget != null && ++followLost >= 4) {
+                    followTarget = null
+                    toast("Hyper-Bot: lost $target")
+                }
+                return@addOnSuccessListener
+            }
+            followLost = 0
+            steerToward(b.exactCenterX() / scale, b.exactCenterY() / scale, b.height() / scale)
+        }
+    }
+
+    /** Joystick towards a point on screen. The bot's own character is roughly at the screen centre. */
+    private fun steerToward(sx: Float, sy: Float, tagH: Float) {
+        val w = screenW()
+        val hgt = screenH()
+        val dx = sx - w * 0.5f
+        val dy = sy - hgt * 0.55f
+        val angle = atan2(dy.toDouble(), dx.toDouble())
+        if (faceTarget != null && followTarget == null) {
+            faceTarget = null
+            nudge(angle, 180)
+            return
+        }
+        val close = tagH > hgt * 0.04f || (abs(dx) < w * 0.08f && tagH > hgt * 0.03f)
+        if (close) return // near enough: wait for them to move
+        nudge(angle, 700)
+    }
+
+    private fun nudge(angle: Double, ms: Long) {
+        val (cx, cy) = pos("JOY")
+        val r = dp(60).toFloat()
+        stroke(cx, cy, cx + (cos(angle) * r).toFloat(), cy + (sin(angle) * r).toFloat(), ms)
+        lastWalkAt = System.currentTimeMillis()
+        lastWalkAngle = angle
+        busyUntil = maxOf(busyUntil, lastWalkAt + ms + 100)
+    }
+
+    /** Tiny greyscale samples from the left and right edges (not the centre, where our own character animates). */
+    private fun thumbnail(bmp: Bitmap): IntArray {
+        val out = IntArray(240)
+        var k = 0
+        for (side in 0..1) {
+            val x0 = if (side == 0) 0.05f else 0.67f
+            for (gy in 0 until 10) for (gx in 0 until 12) {
+                val x = ((x0 + gx * 0.28f / 11) * (bmp.width - 1)).toInt()
+                val y = ((0.15f + gy * 0.55f / 9) * (bmp.height - 1)).toInt()
+                val c = bmp.getPixel(x, y)
+                out[k++] = ((c shr 16 and 255) * 3 + (c shr 8 and 255) * 6 + (c and 255)) / 10
+            }
+        }
+        return out
+    }
+
+    /** If the bot was walking but the screen edges didn't change in two checks, it's stuck: turn around + jump. */
+    private fun checkStuck(bmp: Bitmap) {
+        val thumb = thumbnail(bmp)
+        val prev = prevThumb
+        prevThumb = thumb
+        if (prev == null) return
+        if (System.currentTimeMillis() - lastWalkAt > 1600) {
+            stuckCount = 0
+            return
+        }
+        var diff = 0L
+        for (i in thumb.indices) diff += abs(thumb[i] - prev[i])
+        if (diff.toDouble() / thumb.size < 3.0) stuckCount++ else stuckCount = 0
+        if (stuckCount >= 2) {
+            stuckCount = 0
+            stuckEscapes++
+            val away = lastWalkAngle + Math.PI + Random.nextDouble(-0.6, 0.6)
+            nudge(away, 900)
+            lh.postDelayed({ jump() }, 300)
+        }
+    }
+
+    private var stuckEscapes = 0
 
     /** Cuts out the chat area (LOG1 = top-left, LOG2 = bottom-right) and reads it with on-device text recognition. */
     private fun ocrChat(bmp: Bitmap, test: Boolean) {
@@ -944,6 +1151,7 @@ class BotService : AccessibilityService() {
             if (!brain.shouldReply(c, prefs.botName, lastOwnChat, now)) continue
             val replies = prefs.replyLines
             if (replies.isEmpty()) break
+            faceToward(c.name)
             if (prefs.waveOnReply) queueChat("/e wave")
             queueChat(brain.fill(replies.random(), c.name))
             break // at most one reply per read
@@ -956,14 +1164,25 @@ class BotService : AccessibilityService() {
             "help", "commands" -> {
                 val moves = MoveStore.load(this).map { it.name.lowercase() }.take(4)
                 val extra = if (moves.isNotEmpty()) " or a move: " + moves.joinToString(" ") else ""
-                queueChat("bot commands: wave dance cheer laugh point jump walk hi$extra")
+                queueChat("bot commands: wave dance cheer laugh point jump walk hi follow stop$extra")
             }
+            "follow", "come" -> {
+                if (followTarget == null) {
+                    startFollow(cmd.from)
+                    queueChat("/e point")
+                }
+            }
+            "stop" -> stopFollow()
             "hi", "hello", "hey" -> {
+                faceToward(cmd.from)
                 val replies = prefs.replyLines
                 if (replies.isNotEmpty() && brain.allowChatAnswer(cmd.from, now)) queueChat(brain.fill(replies.random(), cmd.from))
                 else queueChat("/e wave")
             }
-            "wave", "cheer", "laugh", "point" -> queueChat("/e " + cmd.name)
+            "wave", "cheer", "laugh", "point" -> {
+                if (cmd.name == "wave") faceToward(cmd.from)
+                queueChat("/e " + cmd.name)
+            }
             "dance" -> queueChat("/e " + listOf("dance", "dance2", "dance3").random())
             "jump" -> whenFree {
                 val times = Random.nextInt(1, 4)
@@ -1020,6 +1239,7 @@ class BotService : AccessibilityService() {
         auto = true
         lastIntro = 0L // announce straight away
         h.post(tick)
+        ensureVision()
         toast("Hyper-Bot: Auto ON")
     }
 
@@ -1031,7 +1251,7 @@ class BotService : AccessibilityService() {
 
     private fun autoStep() {
         val now = System.currentTimeMillis()
-        if (now < busyUntil) return
+        if (now < busyUntil || followTarget != null) return
         // always (re)announce that this is a bot: on start and every 10 minutes
         if (prefs.chatOn && now - lastIntro > 10 * 60_000L) {
             lastIntro = now

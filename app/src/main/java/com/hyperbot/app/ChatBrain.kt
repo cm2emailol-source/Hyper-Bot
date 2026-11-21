@@ -20,7 +20,7 @@ class ChatBrain {
     private val lastCommandFrom = HashMap<String, Long>()
     private val commandTimes = ArrayDeque<Long>()
 
-    val knownCommands = setOf("help", "commands", "hi", "hello", "hey", "wave", "dance", "cheer", "laugh", "point", "jump", "walk", "move")
+    val knownCommands = setOf("help", "commands", "hi", "hello", "hey", "wave", "dance", "cheer", "laugh", "point", "jump", "walk", "move", "follow", "come", "stop")
 
     private val greetings = setOf("hi", "hii", "hiii", "hello", "helo", "hey", "heyy", "heya", "sup", "yo", "hola", "wassup", "howdy", "hai")
 
