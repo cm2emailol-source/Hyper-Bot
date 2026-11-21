@@ -11,8 +11,10 @@ android {
         applicationId = "com.hyperbot.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 10
-        versionName = "0.6.1"
+        versionCode = 11
+        versionName = "0.6.2"
+        // Galaxy Tab A9+ (Snapdragon 695) is arm64: ship only that, which keeps the APK much smaller
+        ndk { abiFilters += listOf("arm64-v8a") }
     }
 
     // Fixed debug signing key, so new builds install over old ones (no uninstalling).
