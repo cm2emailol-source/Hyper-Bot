@@ -170,7 +170,7 @@ AiPoll() {
             AI.pending.RemoveAt(i)
             txt := ""
             try txt := JsonContent(p.req.ResponseText)
-            p.cb(txt, done ? "" : "timed out")
+            p.cb.Call(txt, done ? "" : "timed out")
             continue
         }
         i++
