@@ -332,26 +332,66 @@ class BotService : AccessibilityService() {
     fun sendChat(text: String, test: Boolean = false) {
         val now = System.currentTimeMillis()
         if (now < busyUntil && !test) return
-        busyUntil = now + 4500 + text.length * 140L
+        busyUntil = now + 12_000 + text.length * 140L
         diag = StringBuilder()
         diag.append("text: \"").append(text).append("\"\n")
         val (cx, cy) = pos("CHAT")
-        val (bx, by) = pos("BOX")
-        diag.append("tap CHAT at ${cx.toInt()},${cy.toInt()} then BOX at ${bx.toInt()},${by.toInt()}\n")
+        diag.append("tap CHAT at ${cx.toInt()},${cy.toInt()}\n")
         tap(cx, cy)
-        h.postDelayed({ tap(bx, by) }, 700)
-        h.postDelayed({
-            val node = findChatBox()
-            if (node != null && typeInto(node, text)) {
-                h.postDelayed({ finishSend(node, test) }, 450)
-            } else {
-                diag.append("trying method 3: tapping the on-screen keyboard\n")
-                typeWithKeyboard(text) { ok ->
-                    if (ok) h.postDelayed({ finishSend(node, test) }, 300)
-                    else report("FAILED - could not type (no text box and no usable keyboard keys)", true)
+        h.postDelayed({ tapBoxAndWait(text, test, 1) }, 700)
+    }
+
+    /** Taps the chat box, then checks every 0.25 s (up to 3 s) until a text box or keyboard is ready.
+     *  Attempt 2 taps the box again; attempt 3 reopens the chat first. */
+    private fun tapBoxAndWait(text: String, test: Boolean, attempt: Int) {
+        val (bx, by) = pos("BOX")
+        diag.append("attempt $attempt: tap BOX at ${bx.toInt()},${by.toInt()}\n")
+        tap(bx, by)
+        val start = System.currentTimeMillis()
+        val poll = object : Runnable {
+            override fun run() {
+                val node = findChatBox(quiet = true)
+                val keys = keyboardKeys().size
+                val waited = System.currentTimeMillis() - start
+                if (node != null || keys >= 10) {
+                    diag.append("ready after ${waited} ms (text box: ${node != null}, keyboard keys: $keys)\n")
+                    h.postDelayed({ typeAndSend(text, test) }, 250)
+                    return
+                }
+                if (waited < 3000) {
+                    h.postDelayed(this, 250)
+                    return
+                }
+                when (attempt) {
+                    1 -> tapBoxAndWait(text, test, 2)
+                    2 -> {
+                        val (cx, cy) = pos("CHAT")
+                        diag.append("reopening chat\n")
+                        tap(cx, cy)
+                        h.postDelayed({ tapBoxAndWait(text, test, 3) }, 800)
+                    }
+                    else -> {
+                        findChatBox() // log what was visible
+                        diag.append("keyboard keys visible: $keys\n")
+                        report("FAILED - chat box / keyboard never became ready (check BOX calibration)", true)
+                    }
                 }
             }
-        }, 1700)
+        }
+        h.postDelayed(poll, 400)
+    }
+
+    private fun typeAndSend(text: String, test: Boolean) {
+        val node = findChatBox()
+        if (node != null && typeInto(node, text)) {
+            h.postDelayed({ finishSend(node, test) }, 450)
+        } else {
+            diag.append("trying method 3: tapping the on-screen keyboard\n")
+            typeWithKeyboard(text) { ok ->
+                if (ok) h.postDelayed({ finishSend(node, test) }, 300)
+                else report("FAILED - could not type (no text box and no usable keyboard keys)", true)
+            }
+        }
     }
 
     private fun finishSend(node: AccessibilityNodeInfo?, test: Boolean) {
@@ -442,34 +482,35 @@ class BotService : AccessibilityService() {
     }
 
     /** Looks through every window (not just the active one: the keyboard can be the active window). */
-    private fun findChatBox(): AccessibilityNodeInfo? {
+    private fun findChatBox(quiet: Boolean = false): AccessibilityNodeInfo? {
+        val log: (String) -> Unit = { if (!quiet) diag.append(it) }
         val roots = mutableListOf<AccessibilityNodeInfo>()
         try {
             for (w in windows) {
                 val r = w.root ?: continue
                 val isKeyboard = w.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD
-                diag.append("window: ${r.packageName}${if (isKeyboard) " (keyboard)" else ""}\n")
+                log("window: ${r.packageName}${if (isKeyboard) " (keyboard)" else ""}\n")
                 if (!isKeyboard && r.packageName != packageName) roots.add(r)
             }
         } catch (e: Exception) {
-            diag.append("windows list error: ${e.message}\n")
+            log("windows list error: ${e.message}\n")
         }
         rootInActiveWindow?.let { if (it.packageName != packageName && roots.none { r -> r == it }) roots.add(it) }
         for (r in roots) {
             val f = r.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
             if (f != null) {
-                diag.append("focused input: ${f.className} (${f.packageName}) editable=${f.isEditable}\n")
+                log("focused input: ${f.className} (${f.packageName}) editable=${f.isEditable}\n")
                 if (f.isEditable) return f
             }
         }
         for (r in roots) {
             val e = findEditable(r)
             if (e != null) {
-                diag.append("editable box: ${e.className} (${e.packageName})\n")
+                log("editable box: ${e.className} (${e.packageName})\n")
                 return e
             }
         }
-        diag.append("no editable text box found in any window\n")
+        log("no editable text box found in any window\n")
         return null
     }
 
