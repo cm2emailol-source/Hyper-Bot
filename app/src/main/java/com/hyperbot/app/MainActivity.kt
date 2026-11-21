@@ -121,6 +121,15 @@ class MainActivity : Activity() {
         col.addView(repliesEdit)
         waveBox = CheckBox(this).apply { text = "Wave before replying"; isChecked = prefs.waveOnReply }
         col.addView(waveBox)
+        col.addView(CheckBox(this).apply {
+            text = "Allow chat commands (\"bot dance\", \"bot help\" ...)"
+            isChecked = prefs.commandsOn
+            setOnCheckedChangeListener { _, c -> prefs.commandsOn = c }
+        })
+        col.addView(label(
+            "Commands: bot help, bot hi, bot wave / dance / cheer / laugh / point, bot jump, bot walk, " +
+            "bot <move name> (plays your saved move). Most are silent actions. Limits: 1 command per 5 s, " +
+            "each person every 15 s, 8 per minute.", 13f))
         col.addView(label(
             "It replies when someone says \"bot\" / \"robot\" / its name, or says hi soon after the bot spoke. " +
             "Max one reply every 12 s, one per person per minute, 4 per minute. Chat is read from the screen in memory only - " +

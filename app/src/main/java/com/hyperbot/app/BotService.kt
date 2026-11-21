@@ -934,6 +934,13 @@ class BotService : AccessibilityService() {
         val now = System.currentTimeMillis()
         for (l in brain.newLines(lines)) {
             val c = brain.parse(l) ?: continue
+            if (prefs.commandsOn) {
+                val cmd = brain.command(c, prefs.botName, now)
+                if (cmd != null) {
+                    runCommand(cmd, now)
+                    break // at most one action per read
+                }
+            }
             if (!brain.shouldReply(c, prefs.botName, lastOwnChat, now)) continue
             val replies = prefs.replyLines
             if (replies.isEmpty()) break
@@ -941,6 +948,44 @@ class BotService : AccessibilityService() {
             queueChat(brain.fill(replies.random(), c.name))
             break // at most one reply per read
         }
+    }
+
+    /** Commands are mostly silent actions (emotes, jumps, moves); only help/hi type in chat. */
+    private fun runCommand(cmd: ChatBrain.Command, now: Long) {
+        when (cmd.name) {
+            "help", "commands" -> {
+                val moves = MoveStore.load(this).map { it.name.lowercase() }.take(4)
+                val extra = if (moves.isNotEmpty()) " or a move: " + moves.joinToString(" ") else ""
+                queueChat("bot commands: wave dance cheer laugh point jump walk hi$extra")
+            }
+            "hi", "hello", "hey" -> {
+                val replies = prefs.replyLines
+                if (replies.isNotEmpty() && brain.allowChatAnswer(cmd.from, now)) queueChat(brain.fill(replies.random(), cmd.from))
+                else queueChat("/e wave")
+            }
+            "wave", "cheer", "laugh", "point" -> queueChat("/e " + cmd.name)
+            "dance" -> queueChat("/e " + listOf("dance", "dance2", "dance3").random())
+            "jump" -> whenFree {
+                val times = Random.nextInt(1, 4)
+                for (i in 0 until times) lh.postDelayed({ jump() }, i * 650L)
+                busyUntil = System.currentTimeMillis() + times * 650L + 200
+            }
+            "walk" -> whenFree { walkRandom() }
+            else -> { // "move": play a saved move by name (or a random one)
+                val moves = MoveStore.load(this)
+                val want = cmd.arg.removePrefix("move").trim()
+                val m = moves.firstOrNull { it.name.equals(want, ignoreCase = true) }
+                    ?: moves.firstOrNull { want.isNotEmpty() && it.name.lowercase().contains(want) }
+                    ?: if (want.isEmpty() || want == "random") moves.randomOrNull() else null
+                if (m != null) whenFree { playMove(m) }
+            }
+        }
+    }
+
+    /** Runs an action as soon as the bot isn't busy typing or moving. */
+    private fun whenFree(action: () -> Unit) {
+        val wait = (busyUntil - System.currentTimeMillis()).coerceAtLeast(0L)
+        lh.postDelayed({ action() }, wait + 50)
     }
 
     private fun queueChat(text: String) {

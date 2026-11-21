@@ -45,6 +45,10 @@ class Prefs(ctx: Context) {
     val replyLines: List<String>
         get() = replyLinesText.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
 
+    var commandsOn: Boolean
+        get() = p.getBoolean("commandsOn", true)
+        set(v) = p.edit().putBoolean("commandsOn", v).apply()
+
     var waveOnReply: Boolean
         get() = p.getBoolean("waveOnReply", true)
         set(v) = p.edit().putBoolean("waveOnReply", v).apply()

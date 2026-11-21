@@ -7,6 +7,7 @@ package com.hyperbot.app
 class ChatBrain {
 
     data class ChatLine(val name: String, val message: String)
+    data class Command(val name: String, val arg: String, val from: String)
 
     private val seen = LinkedHashSet<String>()
     private var primed = false
@@ -14,6 +15,12 @@ class ChatBrain {
     private val lastReplyTo = HashMap<String, Long>()
     private val replyTimes = ArrayDeque<Long>()
     private var lastReply = 0L
+    private var lastCommand = 0L
+    private var lastHelp = 0L
+    private val lastCommandFrom = HashMap<String, Long>()
+    private val commandTimes = ArrayDeque<Long>()
+
+    val knownCommands = setOf("help", "commands", "hi", "hello", "hey", "wave", "dance", "cheer", "laugh", "point", "jump", "walk", "move")
 
     private val greetings = setOf("hi", "hii", "hiii", "hello", "helo", "hey", "heyy", "heya", "sup", "yo", "hola", "wassup", "howdy", "hai")
 
@@ -57,12 +64,67 @@ class ChatBrain {
      * Should the bot reply? Yes if someone mentions it, or greets shortly after the bot spoke.
      * Limits: 12 s between replies, 60 s per person, at most 4 replies a minute.
      */
+    /** True for the bot's own messages, slash commands and anything it should never react to. */
+    private fun ignored(c: ChatLine, botName: String): Boolean {
+        val msg = norm(c.message)
+        if (botName.isNotBlank() && norm(c.name) == norm(botName)) return true
+        if (recentOwn.any { it.isNotEmpty() && (msg == it || it.contains(msg) && msg.length > 6) }) return true
+        return msg.startsWith("/")
+    }
+
+    /**
+     * "bot dance", "robot wave", "<botname> jump", "@<botname> spin" ... -> Command, or null.
+     * Limits: one command every 5 s, each person every 15 s, at most 8 a minute.
+     */
+    fun command(c: ChatLine, botName: String, now: Long): Command? {
+        if (ignored(c, botName)) return null
+        val msg = norm(c.message).replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()
+        val prefixes = mutableListOf("bot", "robot", "hyperbot", "hyper bot")
+        if (botName.isNotBlank()) prefixes.add(0, norm(botName).replace(Regex("[^a-z0-9 ]"), " ").trim())
+        var rest: String? = null
+        for (p in prefixes) {
+            if (p.isNotEmpty() && msg.startsWith("$p ")) {
+                rest = msg.removePrefix(p).trim()
+                break
+            }
+        }
+        if (rest.isNullOrEmpty()) return null
+        val parts = rest.split(" ", limit = 2)
+        val cmd = parts[0]
+        val arg = if (parts.size > 1) parts[1].trim() else ""
+
+        val from = norm(c.name)
+        if (now - lastCommand < 5_000) return null
+        if (now - (lastCommandFrom[from] ?: 0L) < 15_000) return null
+        while (commandTimes.isNotEmpty() && now - commandTimes.first() > 60_000) commandTimes.removeFirst()
+        if (commandTimes.size >= 8) return null
+        if ((cmd == "help" || cmd == "commands") && now - lastHelp < 60_000) return null
+
+        lastCommand = now
+        lastCommandFrom[from] = now
+        commandTimes.addLast(now)
+        if (cmd == "help" || cmd == "commands") lastHelp = now
+        // unknown words are treated as a saved move's name: "bot spin" -> move "spin"
+        return if (cmd in knownCommands) Command(cmd, arg, c.name) else Command("move", rest, c.name)
+    }
+
+    /** Shares the reply limits (12 s, 60 s per person, 4/min) for chat answers to commands like "bot hi". */
+    fun allowChatAnswer(name: String, now: Long): Boolean {
+        val n = norm(name)
+        if (now - lastReply < 12_000) return false
+        if (now - (lastReplyTo[n] ?: 0L) < 60_000) return false
+        while (replyTimes.isNotEmpty() && now - replyTimes.first() > 60_000) replyTimes.removeFirst()
+        if (replyTimes.size >= 4) return false
+        lastReply = now
+        lastReplyTo[n] = now
+        replyTimes.addLast(now)
+        return true
+    }
+
     fun shouldReply(c: ChatLine, botName: String, lastOwnChat: Long, now: Long): Boolean {
+        if (ignored(c, botName)) return false
         val msg = norm(c.message)
         val name = norm(c.name)
-        if (botName.isNotBlank() && name == norm(botName)) return false
-        if (recentOwn.any { it.isNotEmpty() && (msg == it || it.contains(msg) && msg.length > 6) }) return false
-        if (msg.startsWith("/")) return false
 
         val words = msg.split(Regex("[^a-z0-9]+")).filter { it.isNotEmpty() }
         val mentioned = words.any { it == "bot" || it == "robot" || it == "bots" } ||

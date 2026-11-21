@@ -11,8 +11,8 @@ android {
         applicationId = "com.hyperbot.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 6
-        versionName = "0.3.0"
+        versionCode = 7
+        versionName = "0.4.0"
     }
 
     // Fixed debug signing key, so new builds install over old ones (no uninstalling).
