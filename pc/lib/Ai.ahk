@@ -5,7 +5,7 @@
 ; an outgoing filter (anything flagged is thrown away and the Smart Brain answers), Roblox's own
 ; chat filter, and the usual rate limits.
 
-global AI := {dir: A_LineFile "\..\..\ai", port: 8099, pid: 0, ready: false, pending: [], history: Map(), lastDrive: 0,
+global AI := {lastRaw: "", dir: A_LineFile "\..\..\ai", port: 8099, pid: 0, ready: false, pending: [], history: Map(), lastDrive: 0,
     model: "gemma-4-E2B-it-Q4_0.gguf", mmproj: "mmproj-gemma-4-E2B-it-Q8_0.gguf",
     url: "https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/resolve/main/"}
 
@@ -35,7 +35,7 @@ AiStart() {
     threads := Max(2, EnvGet("NUMBER_OF_PROCESSORS") - 2)
     pid := 0
     Run('"' exe '" -m "' AiPath("models\" AI.model) '" --mmproj "' AiPath("models\" AI.mmproj) '" --host 127.0.0.1 --port ' AI.port
-        . ' -c 4096 -t ' threads ' --no-webui', AI.dir, "Hide", &pid)
+        . ' -c 4096 -t ' threads ' --no-webui --reasoning-budget 0', AI.dir, "Hide", &pid)
     AI.pid := pid, AI.ready := false
     SetTimer(AiPoll, 200)
     return true
@@ -139,7 +139,7 @@ AiAsk(messages, cb, maxTokens := 40) {
         else
             body .= '"' JsonEsc(msg.content) '"}'
     }
-    body .= '],"max_tokens":' maxTokens ',"temperature":0.7,"stream":false}'
+    body .= '],"max_tokens":' (maxTokens + 20) ',"temperature":0.7,"stream":false,"chat_template_kwargs":{"enable_thinking":false}}'
     try {
         req := ComObject("WinHttp.WinHttpRequest.5.1")
         req.Open("POST", "http://127.0.0.1:" AI.port "/v1/chat/completions", true)
@@ -169,7 +169,10 @@ AiPoll() {
         if done || A_TickCount - p.t > 90000 {
             AI.pending.RemoveAt(i)
             txt := ""
-            try txt := JsonContent(p.req.ResponseText)
+            try {
+                AI.lastRaw := p.req.ResponseText
+                txt := JsonContent(AI.lastRaw)
+            }
             p.cb.Call(txt, done ? "" : "timed out")
             continue
         }

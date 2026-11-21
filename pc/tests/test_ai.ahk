@@ -26,6 +26,8 @@ Ask(label, msgs, tokens := 40) {
         AiPoll()
         Sleep 100
     }
+    if answers.Has(label) && answers[label] = ""
+        P("   raw: " SubStr(AI.lastRaw, 1, 600))
 }
 sys := {role: "system", content: AiRules("Happy", "HyperBot")}
 Ask("hello", [sys, {role: "user", content: "Alex says: hi bot whats up"}])
