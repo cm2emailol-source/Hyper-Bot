@@ -1046,7 +1046,7 @@ BuildGui() {
 
     ; --- Chat & Brain
     tab.UseTab(2)
-    gw.AddText("x24 y82", "Intro (must contain ""bot"" - said on start and every 10 min):")
+    gw.AddText("x24 y82", "Intro (must contain `"bot`" - said on start and every 10 min):")
     G.intro := gw.AddEdit("x24 y+4 w530", C["intro"])
     gw.AddText("x24 y+8", "Random chat lines (one per line):")
     G.lines := gw.AddEdit("x24 y+4 w260 h70", JoinLines("lines"))
@@ -1109,7 +1109,7 @@ BuildGui() {
     b.OnEvent("Click", (*) => RenameMove())
     b := gw.AddButton("x300 y+8 w150", "Delete")
     b.OnEvent("Click", (*) => DeleteMove())
-    G.movesInAuto := gw.AddCheckBox("x24 y+150 " (On("movesInAuto") ? "Checked" : ""), "Use my moves in Auto (and players can say ""bot <move name>"")")
+    G.movesInAuto := gw.AddCheckBox("x24 y+150 " (On("movesInAuto") ? "Checked" : ""), "Use my moves in Auto (and players can say `"bot <move name>`")")
     G.movesInAuto.OnEvent("Click", (*) => (C["movesInAuto"] := G.movesInAuto.Value ? "1" : "0", SaveCfg()))
 
     ; --- About
@@ -1168,7 +1168,7 @@ SaveFromGui() {
     C["camKeys"] := G.camKeys.Text
     SaveCfg()
     SetMood(C["mood"])
-    Status(InStr(C["intro"], "bot") ? "Saved" : "Saved - but the intro must contain ""bot"", so the default intro is used")
+    Status(InStr(C["intro"], "bot") ? "Saved" : "Saved - but the intro must contain `"bot`", so the default intro is used")
 }
 
 MoodPicked(ctrl, *) {
