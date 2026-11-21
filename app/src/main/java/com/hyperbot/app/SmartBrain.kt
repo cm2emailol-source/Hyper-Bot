@@ -84,7 +84,10 @@ class SmartBrain {
     /** One word or phrase present in the message? Words of 5+ letters allow one typo. */
     private fun has(words: List<String>, text: String, alt: String): Boolean {
         if (alt.contains(' ')) return " $text ".contains(" $alt ")
-        return words.any { w -> w == alt || (alt.length >= 5 && w.length >= 4 && lev(w, alt) <= 1) }
+        return words.any { w ->
+            w == alt || (alt.length >= 5 && w.length >= 4 && lev(w, alt) <= 1) ||
+                (alt.length >= 4 && w.startsWith(alt) && w.length - alt.length <= 3) // hack -> hacking, cool -> cooler
+        }
     }
 
     // ------------------------------------------------------------------ topic database
@@ -131,9 +134,9 @@ class SmartBrain {
         // social
         t("love", "i love you|love you|marry me|be my friend|are we friends|friends|bestie|bff",
             "aw, thanks! we can be friends :)", "friends! beep boop", "you seem nice :)"),
-        t("compliment", "you are|you look|you so;cool|nice|cute|awesome|funny|smart|best|great|amazing|good",
+        t("compliment", "you are|you look|you so|your so|your|you re|you is;cool|nice|cute|awesome|funny|smart|best|great|amazing|good",
             "aw thanks! you're cool too", "thank you!! *happy beeps*", "you're making my circuits blush"),
-        t("insult", "you are|you so|ur;dumb|stupid|bad|trash|ugly|noob|boring|weird|annoying|cringe",
+        t("insult", "you are|you so|your so|your|you re|you is;dumb|stupid|bad|trash|ugly|noob|boring|weird|annoying|cringe",
             "aw, im still learning!", "fair, im just a little bot", "ill try to be better beep boop"),
         t("complimentme", "compliment me|say something nice|am i cool|do you like me|rate my avatar|rate my fit|my avatar|my outfit",
             "your avatar looks awesome!", "you're super cool, 10 out of 10", "nice fit! very stylish", emote = "cheer"),
@@ -330,7 +333,7 @@ class SmartBrain {
         best?.let { tp ->
             var s = pickFrom(tp.id, tp.replies)
             if (tp.id == "greet" && !firstTime) s = listOf("hi again {name}!", "welcome back {name}", "hey {name}, you again :)").random()
-            else if (tp.id == "greet") s = "$s im a bot btw, say bot help"
+            else if (tp.id == "greet") s = "$s - im a bot btw, say bot help"
             return out(s, tp.id, tp.emote)
         }
 
@@ -357,8 +360,8 @@ class SmartBrain {
                 return when {
                     n == a -> { games.remove(k); "yes!! it was $a, you win!" }
                     g.tries >= 3 -> { games.remove(k); "nope, it was $a! good try" }
-                    n < a -> "higher! (${3 - g.tries} tries left)"
-                    else -> "lower! (${3 - g.tries} tries left)"
+                    n < a -> "higher! (${3 - g.tries} ${if (3 - g.tries == 1) "try" else "tries"} left)"
+                    else -> "lower! (${3 - g.tries} ${if (3 - g.tries == 1) "try" else "tries"} left)"
                 }
             }
             else -> { // trivia / riddle
