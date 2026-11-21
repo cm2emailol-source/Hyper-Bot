@@ -81,6 +81,28 @@ jobs:
           type self.txt
           findstr /C:"SELFTEST OK" self.txt
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build the fruit fly brain data (FlyWire 783 connectome)
+        shell: pwsh
+        run: |
+          python -m pip install --quiet numpy scipy pandas pyarrow
+          git clone --depth 1 https://github.com/philshiu/Drosophila_brain_model fly_src
+          git clone --depth 1 https://github.com/flyconnectome/flywire_annotations fly_ann
+          python tools/build_fly_data.py fly_src fly_ann/supplemental_files/Supplemental_file1_neuron_annotations.tsv pc/fly/fly_data.npz
+          Copy-Item fly_src/LICENSE pc/fly/MODEL_LICENSE_Shiu_et_al.txt
+
+      - name: Portable Python for the fly brain (embeddable 3.12 + numpy)
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://www.python.org/ftp/python/3.12.8/python-3.12.8-embed-amd64.zip -OutFile py.zip
+          Expand-Archive py.zip -DestinationPath pc/fly/python
+          python -m pip install --quiet numpy --target pc/fly/python/Lib/site-packages
+          Add-Content pc/fly/python/python312._pth "Lib\site-packages"
+          pc/fly/python/python.exe pc/fly/fly_server.py --selftest
+
       - name: Package
         shell: pwsh
         run: |

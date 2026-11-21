@@ -100,7 +100,9 @@ global S := {auto: false, listening: false, busyUntil: 0, lastChat: 0, lastIntro
     lastOwnChat: -9999999, queue: [], visionCount: 0, testPending: false, moodSince: 0,
     followTarget: "", ownerFollow: false, followUntil: 0, followLost: 0, pendingNearest: false,
     faceTarget: "", faceUntil: 0, lastWalkAt: -9999999, prevThumb: "", stuckCount: 0, stuckEscapes: 0,
-    recording: false, recStart: 0, recEvents: [], recState: Map(), recentNames: [], lastRead: []}
+    recording: false, recStart: 0, recEvents: [], recState: Map(), recentNames: [], lastRead: [],
+    flyOn: false, flyPid: 0, flySound: 0, flyPraise: 0, flyInsult: 0, flyWater: 0, flyTouch: 0, flyWind: 0,
+    flyPrev: "", flyLast: Map(), flyLastWord: -9999999, flyLastGroomChat: -9999999, flyStarted: 0}
 global HELD := Map()
 global brain := ChatBrain()
 global smart := SmartBrain()
@@ -202,7 +204,10 @@ FocusGuard() {
         ReleaseAll()
 }
 
-Jump() => Hold("Space", 90)
+Jump() {
+    S.flyWind += 1
+    return Hold("Space", 90)
+}
 
 CamTurn(dir, ms) {
     if C["camKeys"] = "mouse" {
@@ -445,6 +450,10 @@ CheckStuck() {
     loop t.Length
         d += Abs(t[A_Index] - prev[A_Index])
     S.stuckCount := d / t.Length < 2.5 ? S.stuckCount + 1 : 0
+    if S.stuckCount >= 2 && S.flyOn {
+        S.stuckCount := 0, S.flyTouch += 1 ; the fly feels the wall - its own brain decides what to do
+        return
+    }
     if S.stuckCount >= 2 {
         S.stuckCount := 0, S.stuckEscapes += 1
         ReleaseAll()
@@ -461,7 +470,7 @@ VisionTick() {
         return
     S.visionCount += 1
     now := NowMs()
-    if On("stuckOn") && (S.auto || S.followTarget != "") && !S.recording
+    if (On("stuckOn") || S.flyOn) && (S.auto || S.followTarget != "") && !S.recording
         CheckStuck()
     if S.pendingNearest
         return SeekNearest()
@@ -527,6 +536,13 @@ HandleChat(lines, test) {
         if cl = ""
             continue
         NoteName(cl.name)
+        if S.flyOn && !brain.Ignored(cl, C["botName"]) {
+            FlyHears(cl.message)
+            cmd := On("commandsOn") ? brain.Command(cl, C["botName"], now) : ""
+            if cmd != "" && (cmd.name = "stop" || cmd.name = "help" || cmd.name = "commands")
+                RunCommand(cmd, now)
+            continue
+        }
         ft := S.followTarget
         if ft != "" && Similar(NormName(cl.name), NormName(ft)) && WantsNoFollow(cl.message) {
             if S.ownerFollow
@@ -774,6 +790,8 @@ StartAuto() {
 }
 
 StopAuto() {
+    if S.flyOn
+        FlyStop()
     S.auto := false
     SetTimer(AutoTick, 0)
     ReleaseAll()
@@ -811,6 +829,13 @@ AutoStep() {
         return SendChat(SafeIntro())
     }
     m := CurMood()
+    if m.id = "fly" {
+        if !S.flyOn
+            FlyStart()
+        return
+    }
+    if S.flyOn
+        FlyStop()
     if On("chatOn") && now - S.lastChat > Num("chatInterval") * 1000 * m.chatScale
         return SayRandomLine()
     if On("moodRotate") && now - S.moodSince > 600000 {
@@ -987,7 +1012,7 @@ BuildGui() {
     gw.SetFont("s9 norm c808080")
     gw.AddText("x+10 yp+9", "v" VERSION "  -  a friendly bot (always says it's a bot)  -  alt accounts only")
     gw.SetFont("s10 norm c000000")
-    tab := gw.AddTab3("x10 y44 w560 h500", ["Control", "Chat && Brain", "Moods && Camera", "Moves", "About"])
+    tab := gw.AddTab3("x10 y44 w560 h500", ["Control", "Chat && Brain", "Moods && Camera", "Moves", "Fly Brain", "About"])
 
     ; --- Control
     tab.UseTab(1)
@@ -1112,8 +1137,25 @@ BuildGui() {
     G.movesInAuto := gw.AddCheckBox("x24 y+150 " (On("movesInAuto") ? "Checked" : ""), "Use my moves in Auto (and players can say `"bot <move name>`")")
     G.movesInAuto.OnEvent("Click", (*) => (C["movesInAuto"] := G.movesInAuto.Value ? "1" : "0", SaveCfg()))
 
-    ; --- About
+    ; --- Fly Brain
     tab.UseTab(5)
+    gw.SetFont("s10 bold c" CYAN)
+    gw.AddText("x24 y82", "Fly Brain mode - a real fruit fly brain drives the bot")
+    gw.SetFont("s9 norm c404040")
+    gw.AddText("x24 y+6 w530", "A whole-brain model of the adult fruit fly (FlyWire connectome: 138,639 neurons, 15 million connections; "
+        . "neuron model from Shiu et al. 2024, Nature). Nothing is scripted. Roblox becomes its senses: chat = sound (antenna), "
+        . "nice words = sugar, mean words = bitter, walls = touch, jumping = wind, screen motion = eyes, brightness = ocelli. "
+        . "Its real command neurons become the controls: forward/turning neurons = walk and steer, MDN = walk backwards, "
+        . "giant fiber = escape jump, grooming neurons = grooming, mouth motor neurons = typing (fly gibberish, max 1 a minute).")
+    gw.AddText("x24 y+8 w530", "How: tick 'Fly Brain' on the Moods && Camera tab, Save, pick it as the mood, then Auto (F8). "
+        . "Listen turns on by itself so the fly can 'hear' chat. It runs in slow motion if your PC can't keep up - that's normal.")
+    gw.SetFont("s10 norm c000000")
+    b := gw.AddButton("x24 y+10 w170", "Fly self-test")
+    b.OnEvent("Click", (*) => FlySelfTest())
+    G.flyMon := gw.AddEdit("x24 y+10 w530 h220 ReadOnly", "Fly Brain is off.")
+
+    ; --- About
+    tab.UseTab(6)
     gw.AddEdit("x24 y82 w530 h400 ReadOnly",
         "Hyper-Bot PC " VERSION "`r`n`r`n"
         . "How it works: it only presses keys, moves the mouse and reads the screen with Windows' built-in OCR - like a player. "
@@ -1126,10 +1168,11 @@ BuildGui() {
         . "Use it on an ALT account only, and never while your main account is playing or macroing.`r`n`r`n"
         . "Setup: Roblox windowed or fullscreen, chat visible. 1) Calibrate chat area. 2) Type the bot's display name on the Chat && Brain tab. "
         . "3) Chat test + Listen test. 4) F8 Auto / F9 Listen.`r`n`r`n"
+        . "Fly Brain: FlyWire connectome (FlyWire Consortium, Dorkenwald et al. 2024; Schlegel et al. 2024) and the brain model of Shiu et al. 2024 (Nature, MIT licence).`r`n"
         . "Credits: OCR library by Descolada (MIT licence, lib\OCR_LICENSE.txt). AutoHotkey v2 (GPL v2). Smart Brain shared with Hyper-Bot for Android.")
     tab.UseTab()
 
-    gw.OnEvent("Close", (*) => ExitApp())
+    gw.OnEvent("Close", (*) => (FlyStop(), ExitApp()))
     RefreshFollowNames()
     if !SELFTEST
         gw.Show("w580 h556")
@@ -1224,4 +1267,193 @@ DeleteMove() {
         try FileRecycle(MOVES_DIR "\" n ".txt")
         RefreshMoves()
     }
+}
+
+; ------------------------------------------------------------------ Fly Brain mode
+
+FlyPython() {
+    p := A_ScriptDir "\fly\python\pythonw.exe"
+    return FileExist(p) ? '"' p '"' : "pythonw"
+}
+
+FlyStart() {
+    if S.flyOn
+        return
+    if !FileExist(A_ScriptDir "\fly\fly_data.npz")
+        return Status("Fly Brain: fly\fly_data.npz is missing (use the full Hyper-Bot PC zip)")
+    DirCreate(A_ScriptDir "\fly\io")
+    FlyWriteSenses(0)
+    try FileDelete(A_ScriptDir "\fly\io\actions.txt")
+    pid := 0
+    try Run(FlyPython() ' "' A_ScriptDir '\fly\fly_server.py"', A_ScriptDir "\fly", "Hide", &pid)
+    catch as e
+        return Status("Fly Brain: couldn't start Python (" e.Message ")")
+    S.flyPid := pid, S.flyOn := true, S.flyLast := Map(), S.flyStarted := NowMs()
+    if !S.listening
+        StartListening()
+    SetTimer(FlyTick, 200)
+    Status("Fly Brain starting (loading 138,639 neurons...)")
+}
+
+FlyStop() {
+    if !S.flyOn
+        return
+    S.flyOn := false
+    SetTimer(FlyTick, 0)
+    try FlyWriteSenses(1)
+    pid := S.flyPid
+    SetTimer(() => (pid && ProcessExist(pid) ? ProcessClose(pid) : 0), -1500)
+    ReleaseAll()
+    try G.flyMon.Value := "Fly Brain stopped."
+}
+
+FlyHears(msg) {
+    S.flySound += 1
+    m := " " RegExReplace(StrLower(msg), "[^a-z ]", " ") " "
+    for w in [" good ", " cute ", " cool ", " love ", " nice ", " awesome ", " best ", " sweet ", " yum ", " candy ", " sugar ", " pizza ", " food ", " cake ", " honey ", " pretty "]
+        if InStr(m, w) {
+            S.flyPraise += 1
+            break
+        }
+    for w in [" bad ", " dumb ", " stupid ", " ugly ", " trash ", " noob ", " hate ", " gross ", " ew ", " weird ", " cringe "]
+        if InStr(m, w) {
+            S.flyInsult += 1
+            break
+        }
+    if InStr(m, " water ") || InStr(m, " drink ") || InStr(m, " rain ")
+        S.flyWater += 1
+}
+
+; 16x9 view of the Roblox window: left/right motion and brightness change, for the fly's eyes and ocelli
+FlyVision(&motionL, &motionR, &lightChange) {
+    motionL := motionR := lightChange := 0
+    if !RbxRect(&x, &y, &w, &h)
+        return
+    TW := 16, TH := 9
+    hdc := DllCall("GetDC", "ptr", 0, "ptr"), mdc := DllCall("CreateCompatibleDC", "ptr", hdc, "ptr")
+    bi := Buffer(40, 0)
+    NumPut("uint", 40, bi, 0), NumPut("int", TW, bi, 4), NumPut("int", -TH, bi, 8), NumPut("ushort", 1, bi, 12), NumPut("ushort", 32, bi, 14)
+    bits := 0
+    hbm := DllCall("CreateDIBSection", "ptr", mdc, "ptr", bi, "uint", 0, "ptr*", &bits, "ptr", 0, "uint", 0, "ptr")
+    obm := DllCall("SelectObject", "ptr", mdc, "ptr", hbm, "ptr")
+    DllCall("SetStretchBltMode", "ptr", mdc, "int", 4)
+    DllCall("StretchBlt", "ptr", mdc, "int", 0, "int", 0, "int", TW, "int", TH, "ptr", hdc, "int", x, "int", y, "int", w, "int", h, "uint", 0x00CC0020)
+    cur := []
+    loop TW * TH {
+        px := NumGet(bits, (A_Index - 1) * 4, "uint")
+        cur.Push((((px >> 16) & 255) * 3 + ((px >> 8) & 255) * 6 + (px & 255)) // 10)
+    }
+    DllCall("SelectObject", "ptr", mdc, "ptr", obm), DllCall("DeleteObject", "ptr", hbm)
+    DllCall("DeleteDC", "ptr", mdc), DllCall("ReleaseDC", "ptr", 0, "ptr", hdc)
+    prev := S.flyPrev
+    S.flyPrev := cur
+    if prev = ""
+        return
+    dl := dr := 0, sumC := sumP := 0
+    loop TW * TH {
+        i := A_Index, d := Abs(cur[i] - prev[i]), sumC += cur[i], sumP += prev[i]
+        if Mod(i - 1, TW) < TW // 2
+            dl += d
+        else
+            dr += d
+    }
+    half := TW * TH / 2
+    motionL := Round(dl / half / 255, 3), motionR := Round(dr / half / 255, 3)
+    lightChange := Round(Abs(sumC - sumP) / (TW * TH) / 255, 3)
+}
+
+FlyWriteSenses(quit := 0) {
+    FlyVision(&mL, &mR, &lc)
+    players := Min(3, S.recentNames.Length)
+    txt := "sound=" S.flySound "`npraise=" S.flyPraise "`ninsult=" S.flyInsult "`nwater=" S.flyWater
+        . "`ntouch=" S.flyTouch "`nwind=" S.flyWind "`nmotionL=" mL "`nmotionR=" mR "`nlightchange=" lc
+        . "`nplayers=" players "`nquit=" quit "`n"
+    f := A_ScriptDir "\fly\io\senses.txt"
+    try {
+        FileOpen(f ".tmp", "w", "UTF-8-RAW").Write(txt)
+        FileMove(f ".tmp", f, 1)
+    }
+}
+
+FlyReadActions() {
+    out := Map()
+    try txt := FileRead(A_ScriptDir "\fly\io\actions.txt", "UTF-8")
+    catch
+        return out
+    for line in StrSplit(txt, "`n", "`r")
+        if (i := InStr(line, "=")) > 1
+            out[SubStr(line, 1, i - 1)] := SubStr(line, i + 1)
+    return out
+}
+
+FlyNum(a, k) => a.Has(k) && IsNumber(a[k]) ? Number(a[k]) : 0
+
+FlyTick() {
+    if !S.flyOn
+        return
+    if !RbxActive() {
+        ReleaseAll()
+        return
+    }
+    FlyWriteSenses(0)
+    a := FlyReadActions()
+    if !a.Has("seq") {
+        if NowMs() - S.flyStarted > 60000
+            Status("Fly Brain: no answer from the fly engine - try the Fly self-test on the Fly Brain tab")
+        return
+    }
+    last := S.flyLast
+    if last.Has("seq") && last["seq"] = a["seq"]
+        return
+    jumped := FlyNum(a, "jumps") > FlyNum(last, "jumps")
+    backed := FlyNum(a, "backs") > FlyNum(last, "backs")
+    groomed := FlyNum(a, "grooms") > FlyNum(last, "grooms")
+    spoke := FlyNum(a, "words") > FlyNum(last, "words") && a.Has("word") && a["word"] != ""
+    S.flyLast := a
+    if !last.Has("seq")
+        return Status("Fly Brain is alive")
+    now := NowMs(), fwd := FlyNum(a, "forward"), turn := FlyNum(a, "turn"), did := []
+    spd := Max(0.2, FlyNum(a, "speed")) ; slow-motion brain -> longer key presses per decision
+    if jumped
+        Jump(), S.flyWind -= 1, did.Push("ESCAPE JUMP (giant fiber)")
+    if backed
+        Hold("s", Min(900, Round(450 / spd))), did.Push("moonwalk back (MDN)")
+    else if fwd > 0.3
+        Hold("w", Min(900, Round(220 / spd))), S.lastWalkAt := now, did.Push("walk " Round(fwd * 100) "%")
+    if Abs(turn) > 0.08
+        CamTurn(turn < 0 ? -1 : 1, Min(300, Round(Abs(turn) * 400))), did.Push("turn " (turn < 0 ? "left" : "right"))
+    if groomed {
+        Hold("a", 110), SetTimer(Hold.Bind("d", 110), -150), did.Push("grooming")
+        if now - S.flyLastGroomChat > 120000 && now - S.flyLastWord > 30000 && Random(1, 3) = 1
+            S.flyLastGroomChat := now, QueueChat("[fly brain bot] *rubs front legs together*")
+    }
+    if spoke && now - S.flyLastWord > 60000
+        S.flyLastWord := now, QueueChat("[fly brain bot] " a["word"]), did.Push("typed: " a["word"])
+    try G.flyMon.Value := "FLY BRAIN LIVE   (brain time " Round(FlyNum(a, "brainms") / 1000, 1) " s, speed x" a["speed"] " real time)`r`n"
+        . "spikes in the last 0.2 s: " a["spikes"] "    neurons active: " a["active"] " / 138,639`r`n"
+        . "descending (command) neuron spikes: " a["dn"] "    mouth motor spikes: " a["mouth"] "`r`n"
+        . "forward drive: " Round(fwd * 100) "%    turn: " turn "`r`n"
+        . "escape jumps: " a["jumps"] "   moonwalks: " a["backs"] "   grooms: " a["grooms"] "   words typed: " a["words"] "`r`n"
+        . "senses: sound " S.flySound "  sugar " S.flyPraise "  bitter " S.flyInsult "  touch " S.flyTouch "  wind " S.flyWind "`r`n`r`n"
+        . "now: " (did.Length ? JoinArr(did) : "resting")
+}
+
+JoinArr(arr, sep := ", ") {
+    out := ""
+    for x in arr
+        out .= (out = "" ? "" : sep) x
+    return out
+}
+
+FlySelfTest() {
+    if !FileExist(A_ScriptDir "\fly\fly_data.npz")
+        return G.flyMon.Value := "fly\fly_data.npz is missing (use the full Hyper-Bot PC zip)."
+    G.flyMon.Value := "Running the fly self-test (about 10-30 s)..."
+    py := StrReplace(FlyPython(), "pythonw", "python")
+    out := A_Temp "\hyperbot_fly_selftest.txt"
+    try {
+        RunWait(A_ComSpec ' /c "' py ' "' A_ScriptDir '\fly\fly_server.py" --selftest > "' out '" 2>&1"', A_ScriptDir "\fly", "Hide")
+        G.flyMon.Value := FileRead(out)
+    } catch as e
+        G.flyMon.Value := "Self-test couldn't run: " e.Message
 }

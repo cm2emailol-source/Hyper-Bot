@@ -5,3 +5,7 @@ local.properties
 *.iml
 .idea/
 *.apk
+pc/fly/fly_data.npz
+pc/fly/io/
+pc/fly/python/
+__pycache__/

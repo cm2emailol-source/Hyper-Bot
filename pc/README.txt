@@ -38,4 +38,17 @@ Files
   moves\*.txt       your recorded moves
   follow_log.ini    follow cooldowns
 
-Credits: OCR library by Descolada (MIT, lib\OCR_LICENSE.txt). AutoHotkey v2 (GPL v2, AutoHotkey_license.txt).
+Fly Brain mode (new)
+  A whole-brain model of the adult fruit fly drives the bot: 138,639 real neurons and 15 million
+  connections from the FlyWire connectome, simulated with the neuron model of Shiu et al. 2024 (Nature).
+  Roblox becomes its senses (chat = sound, nice words = sugar, mean words = bitter, walls = touch,
+  jumping = wind, screen motion = eyes, brightness = ocelli) and its real command neurons become the
+  controls (walking/turning neurons, MDN "moonwalker" = backwards, giant fiber = escape jump,
+  grooming neurons, mouth motor neurons = typing fly gibberish, max one message a minute).
+  Turn it on: Moods & Camera tab > tick "Fly Brain" > Save, pick "Fly Brain" as the mood, press F8.
+  It runs offline in fly\ with its own portable Python. It may run in slow motion on slower PCs.
+  Fly Brain tab: live monitor (spikes, active neurons, what it's doing) and a self-test.
+
+Credits: Fruit fly connectome: FlyWire Consortium (Dorkenwald et al. 2024, Schlegel et al. 2024, Nature).
+  Brain model: Shiu et al. 2024, Nature (MIT licence, fly\MODEL_LICENSE_Shiu_et_al.txt).
+  OCR library by Descolada (MIT, lib\OCR_LICENSE.txt). AutoHotkey v2 (GPL v2, AutoHotkey_license.txt).
