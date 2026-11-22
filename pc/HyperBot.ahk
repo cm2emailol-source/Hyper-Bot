@@ -26,7 +26,7 @@ CoordMode "Pixel", "Screen"
 SendMode "Event"
 SetKeyDelay 25, 30
 
-global VERSION := "2.8.0"
+global VERSION := "2.9.0"
 global RBX := "ahk_exe RobloxPlayerBeta.exe" ; the game window (changes with the Game selector)
 
 ; ---- games + controls: every action the bot does goes through KEYS (or VRChat OSC)
@@ -1334,8 +1334,10 @@ BuildGui() {
     G.aiGpu.OnEvent("Change", (*) => (C["aiGpuMode"] := ["light", "full", "off"][G.aiGpu.Value], SaveCfg(),
         Status("GPU mode: " C["aiGpuMode"] " (Light = brain on the graphics card, fits next to a game; Full = everything; Off = CPU). Applies at the next Start AI")))
     G.aiState := gw.AddText("x24 y+8 w530 c808080", "AI: not started")
-    G.aiDrive := gw.AddCheckBox("x24 y+6 " (On("aiDrive") ? "Checked" : ""), "AI drives the bot in Auto (looks at the screen every ~15 s and picks walk/turn/jump/emote)")
+    G.aiDrive := gw.AddCheckBox("x24 y+6 w300 " (On("aiDrive") ? "Checked" : ""), "Old F8 Auto: AI picks one move every ~15 s")
     G.aiDrive.OnEvent("Click", (*) => (C["aiDrive"] := G.aiDrive.Value ? "1" : "0", SaveCfg()))
+    G.aiCuda := gw.AddButton("x+8 yp-4 w222", AiHasCuda() ? "NVIDIA speed-up: installed" : "Get NVIDIA speed-up (~600 MB, once)")
+    G.aiCuda.OnEvent("Click", (*) => AiCudaUi())
     gw.AddText("x24 y+10", "AI mode:")
     G.aiMode := gw.AddDropDownList("x+8 yp-3 w280", ["Polite (gentle, kid-friendly)", "Normal (cheeky British, clean)", "Unhinged (swears and roasts back)"])
     G.aiMode.Value := C["aiMode"] = "polite" ? 1 : C["aiMode"] = "unhinged" ? 3 : 2
@@ -1845,15 +1847,30 @@ AiStartUi() {
     if !AiHasModel()
         return Status("AI: download the model first (AI local tab > Download model)")
     AiStart(C["aiGpuMode"])
-    Status("AI starting on the " (AI.gpu ? "graphics card (" AI.gpuMode ")" : "CPU") " (loading Gemma 4 E2B - can take 10-60 s)...")
+    Status("AI starting on the " (AI.gpu ? (AI.dev.name != "" ? AiShortName(AI.dev.name) : "graphics card") " (" AI.gpuMode (AI.engine = "cuda" ? ", NVIDIA engine" : "") ")" : "CPU") " (loading Gemma 4 E2B - can take 10-60 s)...")
     SetTimer(AiStatusUpdate, 1000)
+}
+
+AiCudaUi() {
+    if AiHasCuda()
+        return Status("NVIDIA speed-up is installed - GPU Light/Full use it automatically (Stop AI, then Start AI)")
+    if !AiCudaDownload()
+        return Status("NVIDIA speed-up: download links missing - press Update first")
+    Status("Downloading the NVIDIA speed-up (~600 MB, one time, kept in HyperBot-Data\gpu). When the window says Done: Stop AI, then Start AI")
+    SetTimer(AiCudaCheck, 3000)
+}
+AiCudaCheck() {
+    if !AiHasCuda()
+        return
+    SetTimer(AiCudaCheck, 0)
+    try G.aiCuda.Text := "NVIDIA speed-up: installed"
 }
 
 AiStatusUpdate() {
     info := AI.gpu ? AiGpuInfo() : ""
-    try G.aiState.Text := "AI: " (AI.ready ? "READY on the " (AI.gpu ? "GPU (" AI.gpuMode ")" : "CPU" (AI.fellBack ? " (the graphics card didn't work)" : "")) : AI.pid ? "loading on the " (AI.gpu ? "GPU..." : "CPU...") : "not started")
-        . (info != "" ? "  |  " info : "")
-        . "   model: " (AiHasModel() ? "downloaded" : "not downloaded")
+    try G.aiState.Text := "AI: " (AI.ready ? "READY on " (AI.gpu ? "GPU " AI.gpuMode : "CPU" (AI.fellBack ? " (the graphics card didn't work)" : "")) : AI.pid ? "loading on " (AI.gpu ? "GPU..." : "CPU...") : "not started")
+        . (info != "" ? " | " info : "")
+        . (AiHasModel() ? "" : "   model: not downloaded")
     if !AI.pid
         SetTimer(AiStatusUpdate, 0)
 }

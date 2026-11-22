@@ -7,6 +7,18 @@ OnError((e, *) => (FileAppend("AI TEST ERROR: " e.Message " line " e.Line "`n", 
 P(s) => FileAppend(s "`n", "*")
 P("filter in (should block): " AiInputBlocked("wanna date me") " " AiInputBlocked("whats ur discord") " | (should pass): " AiInputBlocked("what are you doing"))
 P("filter out: '" AiOutputProblem("im a real person lol") "' '" AiOutputProblem("add me on discord") "' '" AiOutputProblem("my number is 5551234") "' ok='" AiOutputProblem("just hanging out by the wall") "'")
+; picks the real graphics card, never the built-in one or a software renderer
+d := AiPickFrom("Available devices:`n  Vulkan0: AMD Radeon(TM) Graphics (2048 MiB, 1900 MiB free)`n  Vulkan1: NVIDIA GeForce RTX 3050 Laptop GPU (6144 MiB, 5800 MiB free)`n")
+d2 := AiPickFrom("Available devices:`n  Vulkan0: llvmpipe (LLVM 15.0.7, 256 bits) (8000 MiB, 8000 MiB free)`n  Vulkan1: Intel(R) UHD Graphics (1024 MiB, 1000 MiB free)`n")
+P("device pick: " d.id " = " AiShortName(d.name) " | " d2.id " | none='" AiPickFrom("no devices").id "'")
+if d.id != "Vulkan1" || d2.id != "Vulkan1" || AiShortName(d.name) != "RTX 3050 Laptop GPU"
+    P("AI TEST ERROR: wrong device pick"), ExitApp(1)
+; speed readout from a real slow log (your PC, build 52)
+inf := AiInfoFrom("slot print_timing: id  0 | task 0 | prompt eval time =   27287.89 ms /   390 tokens (   69.97 ms per token,    14.29 tokens per second)`n"
+    . "slot print_timing: id  0 | task 0 |        eval time =    1159.73 ms /    15 tokens (   82.84 ms per token,    12.07 tokens per second)`n", "NVIDIA GeForce RTX 3050 Laptop GPU", "cuda")
+P("info: " inf)
+if !InStr(inf, "reads 14/s, writes 12/s SLOW") || !InStr(inf, "RTX 3050 Laptop GPU (NVIDIA engine)")
+    P("AI TEST ERROR: info readout"), ExitApp(1)
 ; GPU path on a machine without a graphics card: must still come up (or fall back to the CPU by itself)
 if AiServerExe(true) != "" {
     AiStart("light")
@@ -15,7 +27,7 @@ if AiServerExe(true) != "" {
         AiPoll()
         Sleep 500
     }
-    P("GPU light start: ready=" AI.ready " gpu=" AI.gpu " fellBack=" AI.fellBack " in " Round((A_TickCount - t0) / 1000) " s | info: " AiGpuInfo())
+    P("GPU light start: ready=" AI.ready " gpu=" AI.gpu " fellBack=" AI.fellBack " engine=" AI.engine " in " Round((A_TickCount - t0) / 1000) " s | device: '" AI.dev.id "' | info: " AiGpuInfo())
     AiStop()
     Sleep 1500
 }

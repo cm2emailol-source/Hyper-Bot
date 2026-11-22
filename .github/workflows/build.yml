@@ -120,6 +120,19 @@ jobs:
           $vk = gh api "repos/ggml-org/llama.cpp/releases?per_page=20" --jq '[.[].assets[] | select(.name | test("bin-win-vulkan-x64\\.zip$"))][0].browser_download_url'
           Write-Host "llama.cpp vulkan: $vk"
           if ($vk) { Invoke-WebRequest $vk -OutFile llama-vk.zip; Expand-Archive llama-vk.zip -DestinationPath pc/ai/llama-vulkan }
+          # NVIDIA speed-up (CUDA 12.4 build + NVIDIA runtime DLLs): NOT packaged (~600 MB) - the app downloads it once
+          # into HyperBot-Data\gpu when you press the button. Only the links go in the zip, from a release that has both.
+          $rels = gh api "repos/ggml-org/llama.cpp/releases?per_page=20" | ConvertFrom-Json
+          foreach ($r in $rels) {
+            $cu = $r.assets | Where-Object { $_.name -match 'bin-win-cuda-12\.4-x64\.zip$' -and $_.name -notmatch '^cudart' } | Select-Object -First 1
+            $rt = $r.assets | Where-Object { $_.name -match '^cudart-llama-bin-win-cuda-12\.4-x64\.zip$' } | Select-Object -First 1
+            if ($cu -and $rt) {
+              Set-Content -Path pc/ai/cuda.txt -Value @($cu.browser_download_url, $rt.browser_download_url) -Encoding ascii
+              Write-Host ("NVIDIA speed-up: {0} ({1} MB) + {2} ({3} MB)" -f $cu.name, [int]($cu.size/1MB), $rt.name, [int]($rt.size/1MB))
+              break
+            }
+          }
+          if (!(Test-Path pc/ai/cuda.txt)) { Write-Host "::warning::no CUDA 12.4 build found" }
           Get-ChildItem pc/ai/llama -Recurse -Filter llama-server.exe | Select-Object FullName
 
       - name: whisper.cpp for Ears (Windows build, official release) + soundcard for the ears helper

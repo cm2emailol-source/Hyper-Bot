@@ -5,17 +5,68 @@
 ; an outgoing filter (anything flagged is thrown away and the Smart Brain answers), Roblox's own
 ; chat filter, and the usual rate limits.
 
-global AI := {lastRaw: "", gpu: false, gpuMode: "off", startedAt: 0, fellBack: false, dir: A_LineFile "\..\..\ai", port: 8099, pid: 0, ready: false, pending: [], history: Map(), lastDrive: 0,
+global AI := {lastRaw: "", gpu: false, gpuMode: "off", engine: "cpu", dev: {id: "", name: "", all: []}, startedAt: 0, fellBack: false, dir: A_LineFile "\..\..\ai", port: 8099, pid: 0, ready: false, pending: [], history: Map(), lastDrive: 0,
     model: "gemma-4-E2B-it-Q4_0.gguf", mmproj: "mmproj-gemma-4-E2B-it-Q8_0.gguf",
     url: "https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/resolve/main/"}
 
 AiPath(f) => AI.dir "\" f
-; gpu: the Vulkan build (any modern NVIDIA/AMD/Intel card); otherwise the CPU build
-AiServerExe(gpu := false) {
-    loop files AI.dir (gpu ? "\llama-vulkan" : "\llama") "\llama-server.exe", "R"
+; engines: "cuda" (NVIDIA only, fastest - downloaded once into HyperBot-Data\gpu), "vulkan" (any card), "cpu"
+AiCudaDir() => DATA "\gpu\llama-cuda"
+AiServerExe(kind := "cpu") {
+    kind := kind = true || kind = 1 ? "vulkan" : kind = false || kind = 0 || kind = "" ? "cpu" : kind
+    dir := kind = "cuda" ? AiCudaDir() : AI.dir (kind = "vulkan" ? "\llama-vulkan" : "\llama")
+    loop files dir "\llama-server.exe", "R"
         return A_LoopFileFullPath
     return ""
 }
+AiHasCuda() => AiServerExe("cuda") != ""
+
+; one-time download of the NVIDIA engine (llama.cpp CUDA build + NVIDIA's runtime DLLs, ~600 MB) into HyperBot-Data\gpu,
+; so updates never download it again. The links are written by the build (ai\cuda.txt).
+AiCudaDownload() {
+    try txt := FileRead(AI.dir "\cuda.txt")
+    catch
+        return false
+    urls := []
+    loop parse txt, "`n", "`r"
+        if RegExMatch(A_LoopField, "^https://\S+\.zip$")
+            urls.Push(A_LoopField)
+    if urls.Length < 2
+        return false
+    d := AiCudaDir()
+    DirCreate(d)
+    cmd := ""
+    for i, u in urls
+        cmd .= 'curl.exe -L -C - --fail -o "' d '\part' i '.zip" "' u '" && tar -xf "' d '\part' i '.zip" -C "' d '" && del "' d '\part' i '.zip" && '
+    Run(A_ComSpec ' /c "echo Downloading the NVIDIA speed-up for Hyper-Bot (about 600 MB, one time)... && ' cmd '(echo. & echo Done - press Stop AI then Start AI. You can close this window.) || echo DOWNLOAD FAILED - see the error above & pause"')
+    return true
+}
+
+; asks the engine which graphics devices it sees and picks the real graphics card
+; (NVIDIA first, then AMD/Intel cards, then built-in graphics; never a software renderer)
+AiPickDevice(exe) {
+    f := DATA "\ai_devices.txt"
+    try FileDelete(f)
+    try RunWait(A_ComSpec ' /c ""' exe '" --list-devices > "' f '" 2>&1"', , "Hide")
+    txt := ""
+    try txt := FileRead(f, "UTF-8")
+    return AiPickFrom(txt)
+}
+AiPickFrom(txt) {
+    best := {id: "", name: "", all: []}, score := -1, pos := 1
+    while pos := RegExMatch(txt, "m)^\s*((?:Vulkan|CUDA)\d+)\s*:\s*([^\r\n]+?)\s*(?:\(\d+ MiB[^\r\n]*)?$", &m, pos) {
+        n := Trim(m[2])
+        best.all.Push(m[1] " = " n)
+        s := RegExMatch(n, "i)nvidia|geforce|rtx|gtx|quadro") ? 3 : RegExMatch(n, "i)radeon rx|radeon pro|arc\(?tm\)? [ab]") ? 2
+            : RegExMatch(n, "i)llvmpipe|software|basic render|swiftshader") ? 0 : 1
+        if s > score
+            score := s, best.id := m[1], best.name := n
+        pos += m.Len
+    }
+    return best
+}
+AiShortName(n) => Trim(RegExReplace(RegExReplace(n, "i)\(tm\)|\(r\)|nvidia |geforce |amd |intel\b|graphics card", ""), "\s+", " "))
+
 AiModel(f) => DATA "\models\ai\" f
 AiHasModel() => FileExist(AiModel(AI.model)) && FileExist(AiModel(AI.mmproj))
 
@@ -32,29 +83,42 @@ AiDownload() {
 ; next to a game on a 6 GB card) or "full" (everything on the graphics card). Old true/false values still work.
 AiLogFile() => DATA "\ai_server.log"
 
-AiStart(gpuMode := "off") {
+AiStart(gpuMode := "off", engine := "") {
     if AI.pid && ProcessExist(AI.pid)
         return true
     gpuMode := gpuMode = true || gpuMode = 1 ? "light" : gpuMode = false || gpuMode = 0 || gpuMode = "" ? "off" : gpuMode
-    gpu := gpuMode != "off"
-    if gpu && AiServerExe(true) = ""
-        gpu := false, gpuMode := "off"
-    exe := AiServerExe(gpu)
+    if gpuMode = "off"
+        engine := "cpu"
+    else if engine = ""
+        engine := AiHasCuda() ? "cuda" : "vulkan"
+    if engine != "cpu" && AiServerExe(engine) = ""
+        engine := engine = "cuda" && AiServerExe("vulkan") != "" ? "vulkan" : "cpu"
+    if engine = "cpu"
+        gpuMode := "off"
+    gpu := engine != "cpu"
+    exe := AiServerExe(engine)
     if exe = "" || !AiHasModel()
         return false
-    threads := Max(2, EnvGet("NUMBER_OF_PROCESSORS") - 2)
+    dev := {id: "", name: "", all: []}
+    if gpu
+        dev := AiPickDevice(exe)
+    ; on the graphics card the CPU only feeds it, so leave the cores for the game
+    cores := EnvGet("NUMBER_OF_PROCESSORS")
+    threads := gpu ? Min(4, Max(2, cores // 2)) : Max(2, cores - 2)
     args := ' -m "' AiModel(AI.model) '" --mmproj "' AiModel(AI.mmproj) '" --host 127.0.0.1 --port ' AI.port
-        . ' -t ' threads ' --no-webui --reasoning-budget 0'
+        . ' -t ' threads ' -np 2 --no-webui --reasoning-budget 0'
+    if dev.id != ""
+        args .= " --device " dev.id
     if gpuMode = "light"
-        args .= " -ngl 99 -c 2048 --no-mmproj-offload"
+        args .= " -ngl 99 -c 4096 --no-mmproj-offload"
     else if gpuMode = "full"
-        args .= " -ngl 99 -c 4096"
+        args .= " -ngl 99 -c 8192"
     else
-        args .= " -c 4096"
+        args .= " -c 8192"
     pid := 0
-    ; the server's own messages go to HyperBot-Data\ai_server.log (which card it found, how much fitted on it, errors)
+    ; the server's own messages go to HyperBot-Data\ai_server.log (how much fitted on the card, speed, errors)
     Run(A_ComSpec ' /c ""' exe '"' args ' > "' AiLogFile() '" 2>&1"', AI.dir, "Hide", &pid)
-    AI.pid := pid, AI.ready := false, AI.gpu := gpu, AI.gpuMode := gpuMode, AI.startedAt := A_TickCount
+    AI.pid := pid, AI.ready := false, AI.gpu := gpu, AI.gpuMode := gpuMode, AI.engine := engine, AI.dev := dev, AI.startedAt := A_TickCount
     SetTimer(AiPoll, 200)
     return true
 }
@@ -284,7 +348,8 @@ AiPoll() {
     if AI.gpu && !AI.ready && AI.pid && (!ProcessExist(AI.pid) || A_TickCount - AI.startedAt > 90000) {
         try RunWait(A_ComSpec ' /c taskkill /F /T /PID ' AI.pid, , "Hide")
         AI.pid := 0, AI.fellBack := true
-        AiStart("off") ; the graphics card didn't work out - use the CPU instead
+        ; the graphics card didn't work out: NVIDIA engine -> any-card engine -> CPU
+        AiStart(AI.engine = "cuda" ? AI.gpuMode : "off", AI.engine = "cuda" ? "vulkan" : "cpu")
         return
     }
     if !AI.ready && AI.pid {
@@ -444,18 +509,34 @@ AiPilotParse(txt) {
 
 ; what the AI server reported: graphics card name, how much of the model is on it, memory used, errors
 AiGpuInfo() {
+    txt := ""
     try txt := FileRead(AiLogFile(), "UTF-8")
-    catch
-        return ""
-    dev := "", layers := "", mem := 0, err := ""
-    if RegExMatch(txt, "ggml_vulkan: 0 = ([^\r\n|(]+)", &m)
-        dev := Trim(m[1])
+    return AiInfoFrom(txt, AI.dev.name, AI.engine)
+}
+; short status: card, engine, layers on the card, video memory used, and the speed of the last reply
+AiInfoFrom(txt, devName := "", engine := "") {
+    out := []
+    if devName != ""
+        out.Push(AiShortName(devName) (engine = "cuda" ? " (NVIDIA engine)" : engine = "vulkan" ? " (Vulkan)" : ""))
     if RegExMatch(txt, "offloaded (\d+)/(\d+) layers to GPU", &m)
-        layers := m[1] "/" m[2] " layers on the card"
-    pos := 1
-    while pos := RegExMatch(txt, "Vulkan0[^\r\n]*?buffer size\s*=\s*([\d.]+) MiB", &m, pos)
+        out.Push(m[1] "/" m[2] " layers")
+    mem := 0, pos := 1
+    while pos := RegExMatch(txt, "(?:Vulkan|CUDA)\d[^\r\n]*?buffer size\s*=\s*([\d.]+) MiB", &m, pos)
         mem += Number(m[1]), pos += m.Len
-    if RegExMatch(txt, "i)(out of (device )?memory|failed to allocate[^\r\n]*|ErrorOutOfDeviceMemory)", &m)
-        err := "  OUT OF VIDEO MEMORY"
-    return (dev != "" ? dev : "") (layers != "" ? " - " layers : "") (mem ? " - " Round(mem) " MB used" : "") err
+    if mem
+        out.Push(Round(mem / 1024, 1) " GB")
+    rd := "", wr := "", pos := 1
+    while pos := RegExMatch(txt, "prompt eval time =[^\r\n]*?([\d.]+) tokens per second", &m, pos)
+        rd := Round(m[1]), pos += m.Len
+    pos := 1
+    while pos := RegExMatch(txt, "\|\s+eval time =[^\r\n]*?([\d.]+) tokens per second", &m, pos)
+        wr := Round(m[1]), pos += m.Len
+    if rd != ""
+        out.Push("reads " rd "/s, writes " wr "/s" (rd < 150 ? " SLOW" : ""))
+    if RegExMatch(txt, "i)(out of (device )?memory|failed to allocate|ErrorOutOfDeviceMemory)")
+        out.Push("OUT OF VIDEO MEMORY")
+    s := ""
+    for x in out
+        s .= (A_Index > 1 ? " | " : "") x
+    return s
 }
