@@ -136,6 +136,7 @@ jobs:
           $d = "dist/HyperBot-PC"
           New-Item -ItemType Directory $d -Force | Out-Null
           Copy-Item pc/* $d -Recurse
+          Set-Content "$d/build.txt" "${{ github.run_number }}"
           Remove-Item "$d/tests" -Recurse
           Remove-Item "$d/ears/io" -Recurse -ErrorAction SilentlyContinue
           Remove-Item "$d/voice/io" -Recurse -ErrorAction SilentlyContinue

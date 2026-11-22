@@ -9,13 +9,16 @@ EnvSet("HYPERBOT_DATA", DATA) ; the fly brain and voice engines read this
 ; Finds downloads/settings left in this folder or in other Hyper-Bot folders next to it, and MOVES them in
 ; (moving on the same drive takes no extra space and is instant).
 DataMigrate() {
-    parent := RegExReplace(A_ScriptDir, "\\[^\\]+$")
+    ; look next to this folder AND one level up (zips usually extract to <Downloads>\HyperBot-PC-NN\HyperBot-PC),
+    ; plus Downloads and Desktop
+    parent := RegExReplace(A_ScriptDir, "\\[^\\]+$"), grand := RegExReplace(parent, "\\[^\\]+$")
     roots := [A_ScriptDir]
-    loop files parent "\*", "D" {
-        roots.Push(A_LoopFileFullPath)
-        if DirExist(A_LoopFileFullPath "\HyperBot-PC")
-            roots.Push(A_LoopFileFullPath "\HyperBot-PC")
-    }
+    for base in [parent, grand, EnvGet("USERPROFILE") "\Downloads", EnvGet("USERPROFILE") "\Desktop"]
+        loop files base "\*", "D" {
+            roots.Push(A_LoopFileFullPath)
+            if DirExist(A_LoopFileFullPath "\HyperBot-PC")
+                roots.Push(A_LoopFileFullPath "\HyperBot-PC")
+        }
     rules := [["ai\models\*.gguf", "\models\ai"], ["ears\models\*.bin", "\models\ears"], ["voice\models\*.onnx", "\models\voice"],
         ["voice\models\*.json", "\models\voice"], ["fly\fly_memory.npz", ""], ["settings.ini", ""], ["follow_log.ini", ""], ["moves\*.txt", "\moves"]]
     todo := [], total := 0, seen := Map()

@@ -17,6 +17,7 @@
 #Include %A_LineFile%\..\lib\Osc.ahk
 #Include %A_LineFile%\..\lib\Ears.ahk
 #Include %A_LineFile%\..\lib\Voice.ahk
+#Include %A_LineFile%\..\lib\Update.ahk
 
 Persistent
 SetWorkingDir A_ScriptDir
@@ -25,7 +26,7 @@ CoordMode "Pixel", "Screen"
 SendMode "Event"
 SetKeyDelay 25, 30
 
-global VERSION := "2.2.1"
+global VERSION := "2.3.0"
 global RBX := "ahk_exe RobloxPlayerBeta.exe" ; the game window (changes with the Game selector)
 
 ; ---- games + controls: every action the bot does goes through KEYS (or VRChat OSC)
@@ -164,6 +165,7 @@ if SELFTEST {
     ExitApp 0
 }
 
+SetTimer(() => UpdCheck(true), -8000) ; quietly check for a new build shortly after starting
 SetTimer(VisionTick, 500)
 SetTimer(Pump, 400)
 SetTimer(FocusGuard, 250)
@@ -1095,6 +1097,8 @@ BuildGui() {
         if id = GameId()
             G.game.Value := i
     G.game.OnEvent("Change", GamePicked)
+    b := gw.AddButton("x+8 yp-1 w78", "Update")
+    b.OnEvent("Click", (*) => UpdCheck(false))
     tab := gw.AddTab3("x10 y44 w560 h500 -Wrap", ["Control", "Chat && Brain", "Moods && Camera", "Moves", "Fly Brain", "Sync", "AI local", "Voice", "Controls", "About"])
 
     ; --- Control
