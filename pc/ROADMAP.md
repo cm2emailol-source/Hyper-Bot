@@ -19,6 +19,26 @@ Autopilot with a much bigger toolbox and his **own goals**:
 - Locked rules: never Robux / purchases / trading, no personal info, always says he's a bot,
   follow only with consent, chat rate limits, no swearing in Roblox, F10 stops everything, alt only.
 
+## 3. Jeb - the first custom personality (after E4B)
+Curious, awkward, twitchy, natural and harmless. Loves exploring, finding things out and **watching**.
+- **Behaviour, not just talk:** wanders, stops to stare at things that interest him, "analyses" them out loud.
+- **Movement:** slow, natural turns - **Shift Lock slow turns are his favourite thing**, he loves Shift Lock.
+  Little twitches, pauses, curved wandering, varied walking speed. The most human-moving personality.
+- **Cool avatars:** walks closer, stops at a polite distance and stares/analyses for ~10-20 s, then wanders off.
+  One awkward peek back allowed, then that's it.
+- **Called out** ("stop staring", "go away", "weirdo"): turns away, walks off, won't approach that person
+  again this session.
+- Real following still only with consent ("bot follow me"). All the usual rules stay locked.
+- Needs E4B (good vision to pick what's interesting). His own voice: pick one when we build him.
+
+## 4. Personality maker
+Make your own personalities: name + who he is, how he talks, likes/dislikes, voice, behaviour.
+Polite / Normal / Unhinged on top, rules locked. Saved in HyperBot-Data. Jeb is the first one made with it.
+
+## 5. Model picker (Free will works with any model)
+Any llama.cpp vision model from a dropdown, auto-tuned for the card.
+- **Gemma 4 26B A4B "adult" preset** if the PC gets **32 GB RAM** (experts on the CPU, the rest on the RTX).
+
 ## Also offered
 - **Long-term memory:** remembers players across sessions (saved in HyperBot-Data).
 - **Beat-Bob update:** sharper chat reading (2x upscale, read on change, clean names/badges, b0t/@bot),
