@@ -471,7 +471,8 @@ AiPilotSystem(mood, botName, mode := "normal", mad := false, talk := "chatty", c
         . "- moves: a short plan of 1 to 3 moves in order, each one of forward, left, right, back, jump, wave, dance, idle "
         . "(left/right turn you; walk toward people or interesting things, away from walls).`n"
         . "- say: something to say, or an empty string to stay quiet. Reply to NEW things people said to you if you want to; otherwise talk about what you see or whatever's on your mind. "
-        . "One or two short sentences, casual, lowercase, British slang now and then. Don't repeat what you said recently.`n"
+        . "One or two short sentences, casual, lowercase. Sound like a real person talking, not a catchphrase machine: "
+        . "every line must start differently and say something new. British flavour is fine, but go easy on 'well', 'blimey', 'cheerio' and 'mate'.`n"
         . "- where: " where ".`n"
         . "- Things like [sound: gunshot] or [sound: loud bang] are SOUNDS you heard, not speech: react like a startled, dramatic robot "
         . "(jump, run, back off, freak out out loud).`n`n"
@@ -480,7 +481,7 @@ AiPilotSystem(mood, botName, mode := "normal", mad := false, talk := "chatty", c
         . "Style: " style "`n"
         . "Talking: " chat "`n`n"
         . "# OUTPUT - ONLY this JSON, nothing else:`n"
-        . '{"moves":["forward","left"],"say":"...","where":"voice"}'
+        . '{"moves":[1 to 3 moves],"say":"what you say, or empty","where":"voice"}'
 }
 
 ; {move, say, where} from the model's answer (tolerant of extra text)
@@ -502,6 +503,8 @@ AiPilotParse(txt) {
         out.move := out.moves[1]
     if RegExMatch(txt, '"say"\s*:\s*"((?:[^"\\]|\\.)*)"', &m)
         out.say := Trim(StrReplace(StrReplace(m[1], '\"', '"'), "\n", " "))
+    if RegExMatch(StrLower(out.say), "^what you say|^\.\.\.$|or empty$")
+        out.say := ""
     if RegExMatch(txt, 'i)"where"\s*:\s*"([a-z]+)"', &m)
         out.where := StrLower(m[1])
     return out

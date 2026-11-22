@@ -26,7 +26,7 @@ CoordMode "Pixel", "Screen"
 SendMode "Event"
 SetKeyDelay 25, 30
 
-global VERSION := "2.9.0"
+global VERSION := "2.9.1"
 global RBX := "ahk_exe RobloxPlayerBeta.exe" ; the game window (changes with the Game selector)
 
 ; ---- games + controls: every action the bot does goes through KEYS (or VRChat OSC)
@@ -2179,11 +2179,11 @@ EditRoasts() {
 ; ------------------------------------------------------------------ AI Autopilot
 
 global PILOT := {on: false, plan: [], askedAt: 0, heard: [], chat: [], mine: [], did: [], lastDecision: 0, lastIntro: -9999999,
-    voiceTimes: [], chatTimes: [], seen: 0, decisions: 0}
+    voiceTimes: [], chatTimes: [], seen: 0, decisions: 0, waiting: false, lastVibe: ""}
 
-PilotNote(list, text) {
+PilotNote(list, text, keep := 6) {
     list.Push({t: NowMs(), text: SubStr(text, 1, 160)})
-    while list.Length > 6
+    while list.Length > keep
         list.RemoveAt(1)
 }
 
@@ -2214,7 +2214,7 @@ StartPilot() {
     }
     if !S.listening && IsRoblox()
         StartListening()
-    PILOT.on := true, PILOT.heard := [], PILOT.chat := [], PILOT.mine := [], PILOT.did := [], PILOT.lastDecision := 0
+    PILOT.on := true, PILOT.heard := [], PILOT.chat := [], PILOT.mine := [], PILOT.did := [], PILOT.lastDecision := 0, PILOT.waiting := false
     PILOT.lastIntro := NowMs()
     G.pilotBtn.Text := "Autopilot: ON (F12)"
     PilotSay(SafeIntro(), "both")
@@ -2254,7 +2254,9 @@ PilotTick() {
         PILOT.lastIntro := now
         PilotSay(SafeIntro(), "both")
     }
-    if AI.pending.Length || now - PILOT.lastDecision < 1200
+    ; one question at a time: PILOT.waiting stays set until his answer has been handled
+    ; (before, a second question could slip in while the first answer was being handed back -> doubled lines, "0.0 s")
+    if PILOT.waiting || AI.pending.Length || now - PILOT.lastDecision < 1200
         return
     PILOT.lastDecision := now
     since := PILOT.seen
@@ -2262,8 +2264,9 @@ PilotTick() {
     sitText := "Situation:`n"
         . "- Heard nearby: " PilotList(PILOT.heard, since) "`n"
         . "- Chat: " PilotList(PILOT.chat, since) "`n"
-        . "- You recently said: " PilotList(PILOT.mine, 0) "`n"
+        . "- You recently said (do NOT repeat these ideas or how they start): " PilotList(PILOT.mine, 0) "`n"
         . "- You recently did: " PilotList(PILOT.did, 0) "`n"
+        . PilotVariety()
         . "- Seconds since you last spoke: " (PILOT.mine.Length ? Round((now - PILOT.mine[PILOT.mine.Length].t) / 1000) : "a long time") "`n"
         . "Decide your next move."
     content := sitText
@@ -2273,12 +2276,13 @@ PilotTick() {
             content := {text: sitText, image: img}
     }
     mode := AiGameMode()
-    PILOT.askedAt := NowMs()
+    PILOT.askedAt := NowMs(), PILOT.waiting := true
     sys := AiPilotSystem(CurMood().label, C["botName"], mode, S.aiMadNow, C["pilotTalk"], On("pilotVoice") && VoiceRunning(), On("pilotChat"))
-    AiAsk([{role: "system", content: sys}, {role: "user", content: content}], PilotDecided.Bind(mode), 80, AiTemp(mode))
+    AiAsk([{role: "system", content: sys}, {role: "user", content: content}], PilotDecided.Bind(mode, PILOT.askedAt), 80, AiTemp(mode))
 }
 
-PilotDecided(mode, txt, err) {
+PilotDecided(mode, askedAt, txt, err) {
+    PILOT.waiting := false
     if !PILOT.on
         return
     if err != "" || txt = ""
@@ -2298,12 +2302,86 @@ PilotDecided(mode, txt, err) {
         prob := AiOutputProblem(d.say, mode, 240) ; autopilot may say one or two sentences
         if prob = "" && AiIsCopy(d.say)
             prob := "copied an example"
+        if prob = "" && (r := PilotRepeats(d.say)) != ""
+            prob := "repeating himself (" r ")"
         if prob != ""
             PilotLog("(blocked what he wanted to say: " prob ")")
         else
             said := PilotSay(d.say, d.where)
     }
-    PilotLog("(" Round((NowMs() - PILOT.askedAt) / 1000, 1) " s)  " JoinArr(d.moves.Length ? d.moves : [d.move], " > ") (said != "" ? "  +  " said : ""))
+    PilotLog("(" Round((NowMs() - askedAt) / 1000, 1) " s)  " JoinArr(d.moves.Length ? d.moves : [d.move], " > ") (said != "" ? "  +  " said : ""))
+}
+
+; the words he keeps leaning on - he's told to avoid them as openers
+global PILOT_CRUTCH := ["well", "blimey", "cheerio", "oh", "ah", "right", "hmm", "crikey", "bloody", "mate", "look", "looks"]
+; a different nudge each turn so he doesn't settle into one kind of line (in the turn message, so the
+; system prompt stays the same and the AI's prompt cache keeps working)
+global PILOT_VIBES := ["ask someone nearby a question", "react to one specific thing you can see right now",
+    "make a strange robot observation about this place", "mention something tiny that happened to you (made up, robot life)",
+    "complain dramatically about something small", "give someone a posh compliment", "announce what you're about to do like a sports commentator",
+    "say something short and blunt (3-6 words)", "make a robot noise or a beep joke", "invent a silly rule or fact about this game",
+    "say nothing this time, just move", "say nothing this time, just move", "comment on the move you're doing", "talk to yourself like a confused butler"]
+
+PilotFirstWord(t) => RegExMatch(StrLower(t), "[a-z']+", &m) ? m[0] : ""
+
+PilotVariety() {
+    ; openers used lately
+    used := Map()
+    for it in PILOT.mine
+        if (w := PilotFirstWord(it.text)) != ""
+            used[w] := 1
+    for w in PILOT_CRUTCH
+        if InStr(" well blimey cheerio crikey ", " " w " ")
+            used[w] := 1
+    avoid := ""
+    for w in used
+        avoid .= (avoid = "" ? "" : ", ") w
+    ; moves: if he's been doing the same thing, push him off it
+    cnt := Map(), total := 0
+    for it in PILOT.did
+        cnt[it.text] := (cnt.Has(it.text) ? cnt[it.text] : 0) + 1, total += 1
+    top := "", topN := 0
+    for k, n in cnt
+        if n > topN
+            top := k, topN := n
+    moveTip := total >= 4 && topN * 2 >= total ? "- You keep doing '" top "'. Do something DIFFERENT this time (stop and idle, back off, jump, wave, dance, or turn the other way).`n"
+        : "- Mix up your moves (idle to stand and watch, back, jump, wave, dance are all fine).`n"
+    loop {
+        vibe := PILOT_VIBES[Random(1, PILOT_VIBES.Length)]
+    } until vibe != PILOT.lastVibe
+    PILOT.lastVibe := vibe
+    return "- Don't start with: " avoid ". Start differently from all your recent lines.`n" moveTip
+        . "- Idea for this turn (unless someone just talked to you - then answer them): " vibe ".`n"
+}
+
+; "" or why this line is too close to something he said recently
+PilotRepeats(txt) {
+    words(t) => StrSplit(Trim(RegExReplace(RegExReplace(StrLower(t), "[^a-z' ]", " "), "\s+", " ")), " ")
+    nw := words(txt)
+    if !nw.Length
+        return ""
+    for i, it in PILOT.mine {
+        ow := words(it.text)
+        if !ow.Length
+            continue
+        ; same first two words as one of his last 3 lines
+        if i > PILOT.mine.Length - 3 && nw.Length >= 2 && ow.Length >= 2 && nw[1] = ow[1] && nw[2] = ow[2]
+            return "same opening"
+        ; mostly the same words
+        same := 0, big := 0
+        for w in nw
+            if StrLen(w) > 3 {
+                big += 1
+                for o in ow
+                    if o = w {
+                        same += 1
+                        break
+                    }
+            }
+        if big >= 3 && same / big >= 0.6
+            return "same words"
+    }
+    return ""
 }
 
 ; does the next move of the current plan
@@ -2351,6 +2429,6 @@ PilotSay(text, where) {
     }
     if wantVoice
         PILOT.voiceTimes.Push(now)
-    PilotNote(PILOT.mine, text)
+    PilotNote(PILOT.mine, text, 8)
     return (wantVoice && wantChat ? "said+typed: " : wantVoice ? "said: " : "typed: ") text
 }
