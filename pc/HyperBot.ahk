@@ -13,6 +13,7 @@
 #Include %A_LineFile%\..\lib\Brain.ahk
 #Include %A_LineFile%\..\lib\OCR.ahk
 #Include %A_LineFile%\..\lib\Ai.ahk
+#Include %A_LineFile%\..\lib\Osc.ahk
 
 Persistent
 SetWorkingDir A_ScriptDir
@@ -21,8 +22,40 @@ CoordMode "Pixel", "Screen"
 SendMode "Event"
 SetKeyDelay 25, 30
 
-global VERSION := "1.3.0"
-global RBX := "ahk_exe RobloxPlayerBeta.exe"
+global VERSION := "1.7.0"
+global RBX := "ahk_exe RobloxPlayerBeta.exe" ; the game window (changes with the Game selector)
+
+; ---- games + controls: every action the bot does goes through KEYS (or VRChat OSC)
+global GAMES := Map(
+    "roblox", {label: "Roblox", exe: "RobloxPlayerBeta.exe", osc: false},
+    "vrchat_osc", {label: "VRChat (OSC)", exe: "VRChat.exe", osc: true},
+    "vrchat_keys", {label: "VRChat (keyboard)", exe: "VRChat.exe", osc: false},
+    "custom", {label: "Custom game", exe: "", osc: false})
+global GAME_ORDER := ["roblox", "vrchat_osc", "vrchat_keys", "custom"]
+global ACTIONS := [["w", "Walk forward"], ["s", "Walk back"], ["a", "Walk left"], ["d", "Walk right"], ["Space", "Jump"],
+    ["Left", "Turn camera left"], ["Right", "Turn camera right"], ["LShift", "Shift lock / run"], ["chat", "Open chat"], ["send", "Send chat"]]
+global KEY_DEFAULTS := Map(
+    "roblox", Map("w", "w", "s", "s", "a", "a", "d", "d", "Space", "Space", "Left", "Left", "Right", "Right", "LShift", "LShift", "chat", "/", "send", "Enter"),
+    "vrchat_keys", Map("w", "w", "s", "s", "a", "a", "d", "d", "Space", "Space", "Left", "Left", "Right", "Right", "LShift", "LShift", "chat", "y", "send", "Enter"),
+    "vrchat_osc", Map("w", "w", "s", "s", "a", "a", "d", "d", "Space", "Space", "Left", "Left", "Right", "Right", "LShift", "LShift", "chat", "y", "send", "Enter"),
+    "custom", Map("w", "w", "s", "s", "a", "a", "d", "d", "Space", "Space", "Left", "Left", "Right", "Right", "LShift", "LShift", "chat", "Enter", "send", "Enter"))
+global KEYS := Map()
+
+GameId() => GAMES.Has(C["game"]) ? C["game"] : "roblox"
+IsOsc() => GAMES[GameId()].osc
+IsRoblox() => GameId() = "roblox"
+
+ApplyGame() {
+    global RBX
+    id := GameId()
+    exe := id = "custom" ? Trim(C["customExe"]) : GAMES[id].exe
+    RBX := "ahk_exe " (exe != "" ? exe : "RobloxPlayerBeta.exe")
+    KEYS.Clear()
+    for k, v in KEY_DEFAULTS[id]
+        KEYS[k] := IniRead(CFG_FILE, "keys_" id, k, v)
+}
+
+KeyName(k) => KEYS.Has(k) ? KEYS[k] : k
 global CFG_FILE := A_ScriptDir "\settings.ini"
 global MOVES_DIR := A_ScriptDir "\moves"
 global SELFTEST := A_Args.Length && A_Args[1] = "--selftest"
@@ -46,7 +79,7 @@ global DEFAULTS := Map(
     "waveOnReply", "1", "movesInAuto", "1", "mood", "normal", "enabledMoods", "chill,happy,sleepy,party,curious,silly",
     "moodLines", "1", "moodRotate", "0", "lookAround", "1", "shiftLock", "0", "camKeys", "arrows",
     "stuckOn", "1", "faceTalker", "1", "followName", "", "followSec", "60",
-    "flyExplore", "50", "syncIp", "", "syncCode", "", "aiDrive", "0", "aiMode", "normal",
+    "flyExplore", "50", "syncIp", "", "syncCode", "", "aiDrive", "0", "aiMode", "normal", "game", "roblox", "customExe", "",
     "chatX1", "0.00", "chatY1", "0.04", "chatX2", "0.32", "chatY2", "0.38", "ocrScale", "2"
 )
 global C := Map()
@@ -113,6 +146,7 @@ global guard := FollowGuard(A_ScriptDir "\follow_log.ini")
 global G := {} ; GUI controls
 
 LoadCfg()
+ApplyGame()
 DirCreate(MOVES_DIR)
 BuildGui()
 
@@ -150,7 +184,8 @@ ToggleWindow() {
 
 ; ------------------------------------------------------------------ Roblox window + safe input
 
-RbxActive() => WinActive(RBX)
+; with OSC, VRChat doesn't need to be the active window (inputs go straight to it); otherwise it does
+RbxActive() => IsOsc() ? WinExist(RBX) : WinActive(RBX)
 
 RbxRect(&x, &y, &w, &h) {
     x := y := w := h := 0
@@ -165,6 +200,8 @@ RbxRect(&x, &y, &w, &h) {
 FocusRbx() {
     if !WinExist(RBX)
         return false
+    if IsOsc()
+        return true
     if !WinActive(RBX) {
         WinActivate(RBX)
         WinWaitActive(RBX, , 1)
@@ -173,18 +210,25 @@ FocusRbx() {
 }
 
 ; every key the bot presses goes through here, and only reaches Roblox
+; k is an action name (w/s/a/d/Space/Left/Right/LShift): it becomes your key from the Controls tab, or VRChat OSC
 KeyDown(k) {
     if !RbxActive()
         return false
-    Send "{" k " down}"
     HELD[k] := 1
+    if IsOsc()
+        OscApply(HELD)
+    else
+        Send "{" KeyName(k) " down}"
     return true
 }
 
 KeyUp(k) {
-    Send "{" k " up}"
     if HELD.Has(k)
         HELD.Delete(k)
+    if IsOsc()
+        OscApply(HELD)
+    else
+        Send "{" KeyName(k) " up}"
 }
 
 Hold(k, ms) {
@@ -214,7 +258,7 @@ Jump() {
 }
 
 CamTurn(dir, ms) {
-    if C["camKeys"] = "mouse" {
+    if C["camKeys"] = "mouse" && !IsOsc() {
         if !RbxActive()
             return
         if !On("shiftLock")
@@ -260,9 +304,11 @@ LookAround() {
 }
 
 ToggleShiftLock() {
+    if !IsRoblox()
+        return Status("Shift Lock is a Roblox thing - in other games use the Run key on the Controls tab")
     if !FocusRbx()
         return Status("Shift Lock: Roblox isn't open")
-    Send "{LShift}"
+    Send "{" KeyName("LShift") "}"
     C["shiftLock"] := On("shiftLock") ? "0" : "1"
     G.shift.Text := "Shift Lock: " (On("shiftLock") ? "ON" : "OFF")
     Status("Shift Lock " (On("shiftLock") ? "ON" : "OFF") " (needs 'Shift Lock Switch' on in Roblox settings)")
@@ -272,15 +318,24 @@ ToggleShiftLock() {
 
 SendChat(text, test := false) {
     if !FocusRbx() {
-        Status("Chat: Roblox isn't the active window")
+        Status("Chat: the game window isn't open/active")
         return false
     }
-    ReleaseAll()
-    Send "{/}"
-    Sleep 180
-    SendText(text)
-    Sleep 90
-    Send "{Enter}"
+    if !IsRoblox() && SubStr(text, 1, 3) = "/e " { ; Roblox emote commands don't exist elsewhere: do a little hop instead
+        Jump()
+        return true
+    }
+    if IsOsc() {
+        OscChat(text) ; straight into the chatbox above the avatar
+        S.busyUntil := Max(S.busyUntil, NowMs() + 3000) ; VRChat rate-limits the chatbox
+    } else {
+        ReleaseAll()
+        Send "{" KeyName("chat") "}"
+        Sleep 180
+        SendText(text)
+        Sleep 90
+        Send "{" KeyName("send") "}"
+    }
     S.lastOwnChat := NowMs()
     brain.NoteOwn(text)
     S.busyUntil := Max(S.busyUntil, NowMs() + 500)
@@ -503,6 +558,8 @@ ToggleListen() {
 }
 
 StartListening() {
+    if !IsRoblox()
+        Status("Note: " GAMES[GameId()].label " has no text chat log to read. Hearing voices comes in Phase 2 (ears).")
     S.listening := true
     brain.Reset()
     G.listen.Text := "Listen: ON (F9)"
@@ -1020,9 +1077,18 @@ BuildGui() {
     gw.SetFont("s16 bold c" CYAN)
     gw.AddText("x14 y8", "Hyper-Bot PC")
     gw.SetFont("s9 norm c808080")
-    gw.AddText("x+10 yp+9", "v" VERSION "  -  a friendly bot (always says it's a bot)  -  alt accounts only")
+    gw.AddText("x+10 yp+9", "v" VERSION)
     gw.SetFont("s10 norm c000000")
-    tab := gw.AddTab3("x10 y44 w560 h500", ["Control", "Chat && Brain", "Moods && Camera", "Moves", "Fly Brain", "Sync", "AI local", "About"])
+    gw.AddText("x+20 yp-2", "Game:")
+    labels := []
+    for id in GAME_ORDER
+        labels.Push(GAMES[id].label)
+    G.game := gw.AddDropDownList("x+6 yp-3 w170", labels)
+    for i, id in GAME_ORDER
+        if id = GameId()
+            G.game.Value := i
+    G.game.OnEvent("Change", GamePicked)
+    tab := gw.AddTab3("x10 y44 w560 h500 -Wrap", ["Control", "Chat && Brain", "Moods && Camera", "Moves", "Fly Brain", "Sync", "AI local", "Controls", "About"])
 
     ; --- Control
     tab.UseTab(1)
@@ -1226,8 +1292,34 @@ BuildGui() {
     b.OnEvent("Click", (*) => AiTestAsk())
     G.aiLog := gw.AddEdit("x24 y+8 w530 h90 ReadOnly", "")
 
-    ; --- About
+    ; --- Controls
     tab.UseTab(8)
+    gw.SetFont("s10 bold c" CYAN)
+    G.ctlTitle := gw.AddText("x24 y82 w530", "")
+    gw.SetFont("s9 norm c404040")
+    G.ctlNote := gw.AddText("x24 y+4 w530 h48", "")
+    gw.SetFont("s10 norm c000000")
+    gw.AddText("x24 y+4", "Game window (.exe) for Custom:")
+    G.customExe := gw.AddEdit("x+8 yp-3 w200", C["customExe"])
+    G.keyEdits := Map()
+    for i, a in ACTIONS {
+        opt := Mod(i, 2) = 1 ? "x24 y+8 w140" : "x290 yp w140"
+        gw.AddText(opt, a[2] ":")
+        G.keyEdits[a[1]] := gw.AddEdit("x+4 yp-3 w100", "")
+    }
+    gw.SetFont("s8 c808080")
+    gw.AddText("x24 y+10 w530", "Key names like AutoHotkey: w, Space, Enter, LShift, Left, Right, Up, Down, F1, Numpad8, /, y ... "
+        . "Each game remembers its own keys.")
+    gw.SetFont("s10 norm c000000")
+    b := gw.AddButton("x24 y+8 w120", "Save keys")
+    b.OnEvent("Click", (*) => SaveKeys())
+    b := gw.AddButton("x+8 w140", "Reset to defaults")
+    b.OnEvent("Click", (*) => ResetKeys())
+    b := gw.AddButton("x+8 w160", "Test (hop + chat)")
+    b.OnEvent("Click", (*) => TestControls())
+
+    ; --- About
+    tab.UseTab(9)
     gw.AddEdit("x24 y82 w530 h400 ReadOnly",
         "Hyper-Bot PC " VERSION "`r`n`r`n"
         . "How it works: it only presses keys, moves the mouse and reads the screen with Windows' built-in OCR - like a player. "
@@ -1246,6 +1338,7 @@ BuildGui() {
 
     gw.OnEvent("Close", (*) => (FlyStop(), AiStop(), ExitApp()))
     RefreshFollowNames()
+    RefreshControls()
     if !SELFTEST
         gw.Show("w580 h556")
 }
@@ -1655,7 +1748,7 @@ AiLog(line) {
 }
 
 ; Roblox doesn't allow swearing: Unhinged is capped to Normal for anything sent to Roblox
-AiGameMode() => C["aiMode"] = "unhinged" ? "normal" : C["aiMode"]
+AiGameMode() => C["aiMode"] = "unhinged" && IsRoblox() ? "normal" : C["aiMode"]
 
 AiMad(msg) {
     static anger := 0, last := 0
@@ -1751,4 +1844,58 @@ AiTestAsk() {
     AiLog("TEST [" mode (mad ? ", MAD" : "") "] you: " q "  (thinking...)")
     AiAsk([{role: "system", content: AiRules(CurMood().label, C["botName"], mode, mad)}, {role: "user", content: "Tester says: " q}],
         (txt, err) => AiLog("TEST AI: " (err != "" ? "(" err ")" : txt) "   [filter: " (AiOutputProblem(txt, mode) = "" ? "OK" : "BLOCKED - " AiOutputProblem(txt, mode)) "]"), 40, AiTemp(mode))
+}
+
+; ------------------------------------------------------------------ games + Controls tab
+
+GamePicked(ctrl, *) {
+    C["game"] := GAME_ORDER[ctrl.Value]
+    IniWrite(C["game"], CFG_FILE, "bot", "game")
+    ReleaseAll()
+    ApplyGame()
+    RefreshControls()
+    Status("Game: " GAMES[GameId()].label (IsOsc() ? " - turn on OSC in VRChat: Action Menu (R) > Options > OSC > Enable" : ""))
+}
+
+RefreshControls() {
+    id := GameId()
+    try {
+        G.ctlTitle.Text := "Controls for: " GAMES[id].label
+        G.ctlNote.Text := IsOsc()
+            ? "VRChat (OSC): the bot moves, jumps, turns and types into the chatbox through VRChat's official OSC input - your keyboard is never used "
+            . "and VRChat doesn't need to be the active window. One-time setup in VRChat: Action Menu (R) > Options > OSC > Enable. (Keys below are only used by Shadow clone / moves.)"
+            : id = "roblox" ? "Roblox: Unhinged AI mode is capped to Normal here. Change keys only if you've rebound them in a game."
+            : "The bot presses these keys in the game window. It only acts while that window is the active window."
+        for k, e in G.keyEdits
+            e.Value := KEYS.Has(k) ? KEYS[k] : ""
+        G.customExe.Enabled := id = "custom"
+    }
+}
+
+SaveKeys() {
+    id := GameId()
+    for k, e in G.keyEdits
+        if Trim(e.Value) != ""
+            IniWrite(Trim(e.Value), CFG_FILE, "keys_" id, k)
+    C["customExe"] := Trim(G.customExe.Value)
+    SaveCfg()
+    ApplyGame()
+    RefreshControls()
+    Status("Keys saved for " GAMES[id].label)
+}
+
+ResetKeys() {
+    id := GameId()
+    try IniDelete(CFG_FILE, "keys_" id)
+    ApplyGame()
+    RefreshControls()
+    Status("Keys reset to defaults for " GAMES[id].label)
+}
+
+TestControls() {
+    if !FocusRbx()
+        return Status("Test: open " GAMES[GameId()].label " first (window: " RBX ")")
+    Jump()
+    SetTimer(() => SendChat("Hyper-Bot controls test (I'm a bot)"), -600)
+    Status("Test sent: a hop and a chat message")
 }

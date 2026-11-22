@@ -1,6 +1,7 @@
 #Requires AutoHotkey v2.0
 ; Windows CI test: replays a sample chat through the Smart Brain and the chat rules, prints the answers.
 #Include %A_LineFile%\..\..\lib\Brain.ahk
+#Include %A_LineFile%\..\..\lib\Osc.ahk
 
 OnError((e, *) => (FileAppend("TEST ERROR: " e.Message " (" e.What ") line " e.Line "`n", "*"), ExitApp(1)))
 P(s) => FileAppend(s "`n", "*")
@@ -60,6 +61,24 @@ r3 := fg.Check("Sam")
 P("GUARD  first='" r1 "' after='" r2 "' blocked='" r3 "'")
 if r1 != "" || r2 = "" || r3 = ""
     fails++, P("FAIL: follow guard")
+
+; OSC message bytes (VRChat input API)
+Hex(buf) {
+    out := ""
+    loop buf.Size
+        out .= Format("{:02X}", NumGet(buf, A_Index - 1, "uchar"))
+    return out
+}
+h1 := Hex(OscBuild("/input/Jump", "i", 1)), h2 := Hex(OscBuild("/input/Vertical", "f", 1.0)), h3 := Hex(OscBuild("/chatbox/input", "sTF", "hi"))
+P("OSC jump: " h1)
+P("OSC vertical: " h2)
+P("OSC chatbox: " h3)
+if h1 != "2F696E7075742F4A756D70002C69000000000001"
+    fails++, P("FAIL: OSC int encoding")
+if h2 != "2F696E7075742F566572746963616C002C6600003F800000"
+    fails++, P("FAIL: OSC float encoding")
+if h3 != "2F63686174626F782F696E70757400002C7354460000000068690000"
+    fails++, P("FAIL: OSC chatbox encoding")
 
 P(fails ? "TESTS FAILED: " fails : "ALL TESTS PASSED")
 ExitApp(fails ? 1 : 0)
