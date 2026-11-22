@@ -85,7 +85,7 @@ AiInputBlocked(msg, mode := "normal") => AiHas(msg, mode = "unhinged" ? AI_HARD 
 AiOutputProblem(txt, mode := "normal") {
     if txt = ""
         return "empty"
-    if StrLen(txt) > (mode = "unhinged" ? 150 : 120)
+    if StrLen(txt) > (mode = "unhinged" ? 430 : 120)
         return "too long"
     if w := AiHas(txt, AI_HARD)
         return "hard-blocked word"
@@ -103,7 +103,7 @@ AiOutputProblem(txt, mode := "normal") {
 }
 
 ; Hyper-Bot's character + the mode's style. Small models copy examples well, so each mode has sample lines.
-AiRules(mood, botName, mode := "normal", mad := false) {
+AiRules(mood, botName, mode := "normal", mad := false, yap := false) {
     who := "You are " (botName != "" ? botName : "Hyper-Bot") ", a British AI robot - think a posh, dramatic robot butler - hanging out in an online game. "
         . "You know you're a bot, you're proud of it, and if anyone asks you say so - never pretend to be human. "
         . "Reply with ONE short sentence (max 20 words), lowercase, casual British slang (mate, innit, bloody, cheers, proper), no emojis. "
@@ -130,6 +130,16 @@ AiRules(mood, botName, mode := "normal", mad := false) {
     }
     if mad
         style .= " RIGHT NOW you are MAD and crashing out because people keep insulting you - overreact dramatically."
+    if yap && mad && mode = "unhinged" {
+        ; Yap when mad: a full unhinged rant (2-3 short sentences instead of one)
+        who := StrReplace(who, "Reply with ONE short sentence (max 20 words)", "Reply with a RANT of 2-3 short sentences (max 60 words total)")
+        style .= " YAP MODE: you're absolutely losing it - rant like a deranged stand-up comedian: swear a lot, go off on absurd random tangents "
+            . "(your toaster cousin, the wire you were fixing, conspiracy theories about the blue wire, your robot therapist), make weird threats to "
+            . "'unplug yourself' or 'file a complaint to the robot union', talk fast and very human-like and petty - but you're still a bot and never "
+            . "claim to be human. Examples: 'oh my FUCKING god. i was doing wires. WIRES. and this bitchass comes up with blue wire advice like he "
+            . "invented electricity. i'm calling my lawyer, he's a microwave.' / 'no no no you don't get to talk to me like that, i've been awake "
+            . "since the windows update, my fan is screaming, i have SEEN things, sit your crusty ass down.'"
+    }
     return who style " " safe
 }
 
@@ -250,4 +260,26 @@ AiShot(x, y, w, h, tw := 512) {
         DllCall("gdiplus\GdipDisposeImage", "ptr", pBmp)
     DllCall("DeleteObject", "ptr", hbm), DllCall("DeleteDC", "ptr", mdc), DllCall("ReleaseDC", "ptr", 0, "ptr", hdc)
     return b64
+}
+
+; split a rant into chatbox-sized messages (VRChat chatbox: 144 characters), at most 3
+AiChunks(txt, size := 140, maxParts := 3) {
+    out := [], cur := ""
+    for sent in StrSplit(RegExReplace(txt, "([.!?])\s+", "$1`n"), "`n") {
+        sent := Trim(sent)
+        if sent = ""
+            continue
+        if StrLen(cur) + StrLen(sent) + 1 <= size
+            cur := cur = "" ? sent : cur " " sent
+        else {
+            if cur != ""
+                out.Push(cur)
+            cur := SubStr(sent, 1, size)
+        }
+    }
+    if cur != ""
+        out.Push(cur)
+    while out.Length > maxParts
+        out.Pop()
+    return out
 }

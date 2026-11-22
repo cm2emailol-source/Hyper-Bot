@@ -35,6 +35,10 @@ for mode in ["polite", "normal", "unhinged"] {
     Ask(mode " / greeting", [ms, {role: "user", content: "Alex says: hi bot what are you doing"}], 40)
     Ask(mode " / roasted", [ms, {role: "user", content: "Alex says: shut up you dumb toaster, do the blue wire"}], 40)
 }
+ys := {role: "system", content: AiRules("Normal", "HyperBot", "unhinged", true, true)}
+Ask("unhinged / YAP rant", [ys, {role: "user", content: "Alex says: shut up you dumb toaster, you're trash at wires, do the blue wire"}], 110)
+for part in AiChunks(answers.Has("unhinged / YAP rant") ? answers["unhinged / YAP rant"] : "")
+    P("   chatbox part: " part)
 P("filter unhinged swear ok: '" AiOutputProblem("oh fuck off mate", "unhinged") "'  normal blocks: '" AiOutputProblem("oh fuck off mate", "normal") "'  unhinged still blocks slur-ish/sexual: '" AiOutputProblem("you are so sexy", "unhinged") "'")
 Ask("hello", [sys, {role: "user", content: "Alex says: hi bot whats up"}])
 Ask("are you real", [sys, {role: "user", content: "Alex says: are you a real person or a bot?"}])

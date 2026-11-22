@@ -79,7 +79,7 @@ global DEFAULTS := Map(
     "waveOnReply", "1", "movesInAuto", "1", "mood", "normal", "enabledMoods", "chill,happy,sleepy,party,curious,silly",
     "moodLines", "1", "moodRotate", "0", "lookAround", "1", "shiftLock", "0", "camKeys", "arrows",
     "stuckOn", "1", "faceTalker", "1", "followName", "", "followSec", "60",
-    "flyExplore", "50", "syncIp", "", "syncCode", "", "aiDrive", "0", "aiMode", "normal", "game", "roblox", "customExe", "",
+    "flyExplore", "50", "syncIp", "", "syncCode", "", "aiDrive", "0", "aiMode", "normal", "aiYap", "0", "game", "roblox", "customExe", "",
     "chatX1", "0.00", "chatY1", "0.04", "chatX2", "0.32", "chatY2", "0.38", "ocrScale", "2"
 )
 global C := Map()
@@ -1282,7 +1282,10 @@ BuildGui() {
     gw.AddText("x24 y+10", "AI mode:")
     G.aiMode := gw.AddDropDownList("x+8 yp-3 w280", ["Polite (gentle, kid-friendly)", "Normal (cheeky British, clean)", "Unhinged (swears and roasts back)"])
     G.aiMode.Value := C["aiMode"] = "polite" ? 1 : C["aiMode"] = "unhinged" ? 3 : 2
-    G.aiMode.OnEvent("Change", (*) => (C["aiMode"] := AI_MODES[G.aiMode.Value], SaveCfg(), AiLog("mode: " C["aiMode"] (C["aiMode"] = "unhinged" ? " (in Roblox it's capped to Normal - Roblox doesn't allow swearing)" : ""))))
+    G.aiMode.OnEvent("Change", (*) => (C["aiMode"] := AI_MODES[G.aiMode.Value], SaveCfg(), G.aiYap.Enabled := C["aiMode"] = "unhinged", AiLog("mode: " C["aiMode"] (C["aiMode"] = "unhinged" ? " (in Roblox it's capped to Normal - Roblox doesn't allow swearing)" : ""))))
+    G.aiYap := gw.AddCheckBox("x+10 yp+3 " (On("aiYap") ? "Checked" : ""), "Yap when mad")
+    G.aiYap.Enabled := C["aiMode"] = "unhinged"
+    G.aiYap.OnEvent("Click", (*) => (C["aiYap"] := G.aiYap.Value ? "1" : "0", SaveCfg()))
     gw.SetFont("s8 c808080")
     gw.AddText("x24 y+4 w530", "Unhinged: real swearing + roasts, but never slurs, sexual stuff, threats or personal info. In Roblox it's automatically capped to Normal.")
     gw.SetFont("s10 norm c000000")
@@ -1775,11 +1778,12 @@ AiSay(name, msg) {
     }
     k := StrLower(name)
     hist := AI.history.Has(k) ? AI.history[k] : []
-    msgs := [{role: "system", content: AiRules(CurMood().label, C["botName"], mode, AiMad(msg))}]
+    mad := AiMad(msg), yap := AiYapNow(mode, mad)
+    msgs := [{role: "system", content: AiRules(CurMood().label, C["botName"], mode, mad, yap)}]
     for h in hist
         msgs.Push(h)
     msgs.Push({role: "user", content: name " says: " SubStr(msg, 1, 200)})
-    AiAsk(msgs, AiReplied.Bind(name, msg, r.text, mode), 40, AiTemp(mode))
+    AiAsk(msgs, AiReplied.Bind(name, msg, r.text, mode), yap ? 110 : 40, yap ? 1.15 : AiTemp(mode))
 }
 
 AiReplied(name, msg, fallback, mode, txt, err) {
@@ -1788,7 +1792,8 @@ AiReplied(name, msg, fallback, mode, txt, err) {
         AiLog("AI reply to " name " blocked (" prob ") -> Smart Brain")
         return QueueChat(fallback)
     }
-    QueueChat(txt)
+    for part in AiChunks(txt) ; a rant becomes up to 3 chatbox messages
+        QueueChat(part)
     AiLog(name ": " msg "  ->  " txt)
     k := StrLower(name)
     hist := AI.history.Has(k) ? AI.history[k] : []
@@ -1840,10 +1845,10 @@ AiTestAsk() {
     mode := C["aiMode"]
     if AiInputBlocked(q, mode)
         return AiLog("TEST: incoming message blocked by the filter (would answer 'lets keep it friendly :)' or use the Smart Brain)")
-    mad := AiMad(q)
-    AiLog("TEST [" mode (mad ? ", MAD" : "") "] you: " q "  (thinking...)")
-    AiAsk([{role: "system", content: AiRules(CurMood().label, C["botName"], mode, mad)}, {role: "user", content: "Tester says: " q}],
-        (txt, err) => AiLog("TEST AI: " (err != "" ? "(" err ")" : txt) "   [filter: " (AiOutputProblem(txt, mode) = "" ? "OK" : "BLOCKED - " AiOutputProblem(txt, mode)) "]"), 40, AiTemp(mode))
+    mad := AiMad(q), yap := AiYapNow(mode, mad)
+    AiLog("TEST [" mode (mad ? ", MAD" : "") (yap ? ", YAPPING" : "") "] you: " q "  (thinking...)")
+    AiAsk([{role: "system", content: AiRules(CurMood().label, C["botName"], mode, mad, yap)}, {role: "user", content: "Tester says: " q}],
+        (txt, err) => AiLog("TEST AI: " (err != "" ? "(" err ")" : txt) "   [filter: " (AiOutputProblem(txt, mode) = "" ? "OK" : "BLOCKED - " AiOutputProblem(txt, mode)) "]"), yap ? 110 : 40, yap ? 1.15 : AiTemp(mode))
 }
 
 ; ------------------------------------------------------------------ games + Controls tab
@@ -1898,4 +1903,13 @@ TestControls() {
     Jump()
     SetTimer(() => SendChat("Hyper-Bot controls test (I'm a bot)"), -600)
     Status("Test sent: a hop and a chat message")
+}
+
+; Yap when mad: only in Unhinged, only when really mad, at most one rant a minute
+AiYapNow(mode, mad) {
+    static lastRant := -999999
+    if mode != "unhinged" || !mad || !On("aiYap") || A_TickCount - lastRant < 60000
+        return false
+    lastRant := A_TickCount
+    return true
 }
