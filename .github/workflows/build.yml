@@ -68,6 +68,7 @@ jobs:
           Get-ChildItem ahk | Select-Object Name
 
       - name: Brain tests (Windows)
+        timeout-minutes: 3
         shell: cmd
         run: |
           ahk\AutoHotkey64.exe /ErrorStdOut pc\tests\test_brain.ahk > test.txt 2>&1
@@ -75,6 +76,7 @@ jobs:
           findstr /C:"ALL TESTS PASSED" test.txt
 
       - name: Self-test HyperBot.ahk (loads everything, builds the window, exits)
+        timeout-minutes: 3
         shell: cmd
         run: |
           ahk\AutoHotkey64.exe /ErrorStdOut pc\HyperBot.ahk --selftest > self.txt 2>&1

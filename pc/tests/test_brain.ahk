@@ -81,7 +81,7 @@ if h3 != "2F63686174626F782F696E70757400002C7354460000000068690000"
     fails++, P("FAIL: OSC chatbox encoding")
 
 ; update checker parses the GitHub release list
-#Include %A_LineFile%\..\..\lib\Update.ahk
+#Include %A_LineFile%\..\..\lib\UpdParse.ahk
 sample := '[{"assets":[{"browser_download_url":"https://github.com/x/y/releases/download/pc-build-45/HyperBot-PC-45.zip"},'
     . '{"browser_download_url":"https://github.com/x/y/releases/download/pc-build-45/HyperBot-PC-core-45.zip"},'
     . '{"browser_download_url":"https://github.com/x/y/releases/download/pc-build-45/runtime-0a1b2c3d4e.txt"}]},'
