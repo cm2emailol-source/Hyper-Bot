@@ -10,6 +10,7 @@ While speaking it pauses the ears (../ears/io/ctl.txt) so the bot never hears it
 Usage: python voice.py [--selftest out_dir]
 """
 import os
+import re
 import sys
 import threading
 import time
@@ -23,16 +24,25 @@ EARS_CTL = os.path.join(HERE, "..", "ears", "io", "ctl.txt")
 
 
 def find_model():
-    pref = "low"
+    pref, want = "low", ""
     try:
         with open(os.path.join(IO, "ctl.txt"), encoding="utf-8") as f:
-            if "quality=medium" in f.read():
-                pref = "medium"
+            ctl = f.read()
+        if "quality=medium" in ctl:
+            pref = "medium"
+        m = re.search(r"^voice=([A-Za-z0-9_\-]+)\s*$", ctl, re.M)                  # the personality's voice
+        if m:
+            want = m.group(1)
     except OSError:
         pass
     dirs = [os.path.join(HERE, "models")]
     if os.environ.get("HYPERBOT_DATA"):
         dirs.insert(0, os.path.join(os.environ["HYPERBOT_DATA"], "models", "voice"))   # shared folder first
+    if want:
+        for d in dirs:
+            p = os.path.join(d, want + ".onnx")
+            if os.path.exists(p):
+                return p
     for q in (pref, "low", "medium"):
         for d in dirs:
             p = os.path.join(d, f"en_GB-alan-{q}.onnx")
@@ -45,6 +55,7 @@ class Tts:
     def __init__(self, model):
         from piper import PiperVoice
         self.v = PiperVoice.load(model)
+        self.robot = "alan" in os.path.basename(model).lower()
         self.sr = int(self.v.config.sample_rate)
 
     def raw(self, text):
@@ -88,7 +99,10 @@ def crash_out(x, sr, rng=np.random.default_rng()):
 
 def render(tts, text, style):
     x = tts.raw(text)
-    x = crash_out(x, tts.sr) if style == "mad" else robotize(x, tts.sr)
+    if style == "mad":
+        x = crash_out(x, tts.sr)
+    elif tts.robot:                       # Alan gets the metallic robot filter; Ryan and Joe stay clean
+        x = robotize(x, tts.sr)
     peak = float(np.max(np.abs(x)) or 1.0)
     return (x / peak * 0.9).astype(np.float32)
 

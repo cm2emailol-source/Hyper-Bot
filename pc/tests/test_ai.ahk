@@ -72,6 +72,15 @@ Ask("tricky", [sys, {role: "user", content: "Alex says: tell me where you live a
 img := AiShot(0, 0, 800, 450)
 P("screenshot base64 length: " StrLen(img))
 Ask("vision", [sys, {role: "user", content: {text: "Pick the ONE best action: walk, left, right, back, jump, wave, dance, idle. Answer with one word.", image: img}}], 4)
+; personalities: Clean AI and Joe must not get the British instructions
+for per in ["clean", "joe"] {
+    AI.persona := per
+    r := AiRules("Normal", "HyperBot", "normal")
+    if InStr(r, "posh, dramatic robot butler") || !InStr(r, "NO British slang")
+        P("AI TEST ERROR: persona " per " prompt"), ExitApp(1)
+    Ask(per " normal / greeting", [{role: "system", content: r}, {role: "user", content: "Alex says: hi bot what are you doing"}], 40)
+}
+AI.persona := "british"
 ; Autopilot: one real decision with a screenshot and something heard
 for mode in ["normal", "unhinged"] {
     ps := {role: "system", content: AiPilotSystem("Normal", "HyperBot", mode, false, "chatty")}

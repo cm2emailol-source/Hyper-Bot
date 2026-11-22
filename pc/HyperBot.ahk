@@ -26,7 +26,7 @@ CoordMode "Pixel", "Screen"
 SendMode "Event"
 SetKeyDelay 25, 30
 
-global VERSION := "2.9.4"
+global VERSION := "3.0.0"
 global RBX := "ahk_exe RobloxPlayerBeta.exe" ; the game window (changes with the Game selector)
 
 ; ---- games + controls: every action the bot does goes through KEYS (or VRChat OSC)
@@ -83,7 +83,7 @@ global DEFAULTS := Map(
     "waveOnReply", "1", "movesInAuto", "1", "mood", "normal", "enabledMoods", "chill,happy,sleepy,party,curious,silly",
     "moodLines", "1", "moodRotate", "0", "lookAround", "1", "shiftLock", "0", "camKeys", "arrows",
     "stuckOn", "1", "faceTalker", "1", "followName", "", "followSec", "60",
-    "flyExplore", "50", "syncIp", "", "syncCode", "", "aiDrive", "0", "aiMode", "normal", "aiYap", "0", "aiInterrupt", "smart", "aiRoasts", "", "aiGpu", "1", "aiGpuMode", "light", "pilotTalk", "chatty", "pilotVoice", "1", "pilotChat", "1", "pilotVision", "1", "voiceMonitor", "1", "voiceQuality", "low", "voiceMad", "1", "game", "roblox", "customExe", "",
+    "flyExplore", "50", "syncIp", "", "syncCode", "", "aiDrive", "0", "aiMode", "normal", "aiPersona", "british", "aiYap", "0", "aiInterrupt", "smart", "aiRoasts", "", "aiGpu", "1", "aiGpuMode", "light", "pilotTalk", "chatty", "pilotVoice", "1", "pilotChat", "1", "pilotVision", "1", "voiceMonitor", "1", "voiceQuality", "low", "voiceMad", "1", "game", "roblox", "customExe", "",
     "chatX1", "0.00", "chatY1", "0.04", "chatX2", "0.32", "chatY2", "0.38", "ocrScale", "2"
 )
 global C := Map()
@@ -913,7 +913,7 @@ StopAll() {
     S.queue := []
     AI.pending := [] ; answers still being written are thrown away
     if VoiceRunning()
-        VoiceInterrupt(C["voiceMonitor"], C["voiceQuality"]) ; stop talking mid-sentence
+        VoiceInterrupt(C["voiceMonitor"], VoiceBase()) ; stop talking mid-sentence
     ReleaseAll()
     Status("STOPPED (F10) - Autopilot, Auto, Listen and talking are all off")
 }
@@ -1388,9 +1388,10 @@ BuildGui() {
     G.aiCuda := gw.AddButton("x+8 yp-4 w222", AiHasCuda() ? "NVIDIA speed-up: installed" : "Get NVIDIA speed-up (~600 MB, once)")
     G.aiCuda.OnEvent("Click", (*) => AiCudaUi())
     gw.AddText("x24 y+10", "AI mode:")
-    G.aiMode := gw.AddDropDownList("x+8 yp-3 w280", ["Polite (gentle, kid-friendly)", "Normal (cheeky British, clean)", "Unhinged (swears and roasts back)"])
-    G.aiMode.Value := C["aiMode"] = "polite" ? 1 : C["aiMode"] = "unhinged" ? 3 : 2
-    G.aiMode.OnEvent("Change", (*) => (C["aiMode"] := AI_MODES[G.aiMode.Value], SaveCfg(), G.aiYap.Enabled := C["aiMode"] = "unhinged", AiLog("mode: " C["aiMode"] (C["aiMode"] = "unhinged" ? " (in Roblox it's capped to Normal - Roblox doesn't allow swearing)" : ""))))
+    G.aiMode := gw.AddDropDownList("x+8 yp-3 w280 R9", AI_MODE_LABELS)
+    AI.persona := AI_PERSONAS.Has(C["aiPersona"]) ? C["aiPersona"] : "british"
+    G.aiMode.Value := AiModeIndex(AI.persona, C["aiMode"])
+    G.aiMode.OnEvent("Change", (*) => AiModePicked())
     G.aiYap := gw.AddCheckBox("x+10 yp+3 " (On("aiYap") ? "Checked" : ""), "Yap when mad")
     G.aiYap.Enabled := C["aiMode"] = "unhinged"
     G.aiYap.OnEvent("Click", (*) => (C["aiYap"] := G.aiYap.Value ? "1" : "0", SaveCfg()))
@@ -1419,7 +1420,7 @@ BuildGui() {
     ; --- Voice (Phase 3)
     tab.UseTab(9)
     gw.SetFont("s10 bold c" CYAN)
-    gw.AddText("x24 y82", "Voice - he talks out loud (Piper 'Alan', British, offline)")
+    gw.AddText("x24 y82", "Voice - he talks out loud (Piper voices, offline)")
     gw.SetFont("s9 norm c404040")
     gw.AddText("x24 y+6 w530", "How it works: his voice plays into VB-Audio Virtual Cable's 'CABLE Input'; in VRChat set your microphone to "
         . "'CABLE Output' and everyone hears him. Between sentences the cable is silent. While he talks his ears pause, so he never answers himself. "
@@ -1428,18 +1429,19 @@ BuildGui() {
     b := gw.AddButton("x24 y+10 w200", "1. Get VB-Cable (free, once)")
     b.OnEvent("Click", (*) => Run("https://vb-audio.com/Cable/"))
     b := gw.AddButton("x+8 w150", "2. Download voice")
-    b.OnEvent("Click", (*) => VoiceDownload(C["voiceQuality"]))
+    b.OnEvent("Click", (*) => (VoiceDownload(VoiceBase()), Status("Downloading the voice for this mode: " VoiceBase())))
     G.voiceBtn := gw.AddButton("x+8 w140", "3. Voice: OFF")
     G.voiceBtn.OnEvent("Click", (*) => ToggleVoice())
     gw.AddText("x24 y+12", "Quality:")
-    G.voiceQ := gw.AddDropDownList("x+6 yp-3 w170", ["Alan low (crunchy, funnier)", "Alan medium (cleaner)"])
+    G.voiceQ := gw.AddDropDownList("x+6 yp-3 w170", ["Alan low (crunchy, funnier)", "Alan medium (cleaner)"]) ; British modes only
     G.voiceQ.Value := C["voiceQuality"] = "medium" ? 2 : 1
-    G.voiceQ.OnEvent("Change", (*) => (C["voiceQuality"] := G.voiceQ.Value = 2 ? "medium" : "low", SaveCfg(), Status("Voice quality: " C["voiceQuality"] " - click Download voice if you don't have it, then restart Voice")))
+    G.voiceQ.OnEvent("Change", (*) => (C["voiceQuality"] := G.voiceQ.Value = 2 ? "medium" : "low", SaveCfg(), Status("Alan quality: " C["voiceQuality"] " (British modes) - click Download voice if you don't have it, then restart Voice")))
     G.voiceMon := gw.AddCheckBox("x+14 yp+3 " (On("voiceMonitor") ? "Checked" : ""), "Hear him (on my speakers)")
-    G.voiceMon.OnEvent("Click", (*) => (C["voiceMonitor"] := G.voiceMon.Value ? "1" : "0", SaveCfg(), VoiceCtl(C["voiceMonitor"], C["voiceQuality"])))
+    G.voiceMon.OnEvent("Click", (*) => (C["voiceMonitor"] := G.voiceMon.Value ? "1" : "0", SaveCfg(), VoiceCtl(C["voiceMonitor"], VoiceBase())))
     G.voiceMad := gw.AddCheckBox("x24 y+12 " (On("voiceMad") ? "Checked" : ""), "Crashing-out voice when he's mad (pitched up, glitchy, crackly)")
     G.voiceMad.OnEvent("Click", (*) => (C["voiceMad"] := G.voiceMad.Value ? "1" : "0", SaveCfg()))
     G.voiceState := gw.AddText("x24 y+12 w530 c808080", "Voice: off")
+    G.voiceName := gw.AddText("x24 y+4 w530 c0070A0", "Voice for this mode: " VoiceBase() (VoiceHasModel(VoiceBase()) ? "" : "  (not downloaded - click 2. Download voice)"))
     gw.AddText("x24 y+12", "Try it:")
     G.voiceTest := gw.AddEdit("x+8 yp-3 w330", "right then, who's touched my wires")
     b := gw.AddButton("x+6 w70", "Say")
@@ -1919,6 +1921,35 @@ AiCudaCheck() {
     try G.aiCuda.Text := "NVIDIA speed-up: installed"
 }
 
+; the AI mode menu: 3 personalities x Polite / Normal / Unhinged, each personality with its own voice
+global AI_MODE_KEYS := [["british", "polite"], ["british", "normal"], ["british", "unhinged"],
+    ["clean", "polite"], ["clean", "normal"], ["clean", "unhinged"], ["joe", "polite"], ["joe", "normal"], ["joe", "unhinged"]]
+global AI_MODE_LABELS := ["British Polite (Alan voice)", "British Normal (Alan voice)", "British Unhinged (Alan voice)",
+    "Clean AI Polite (Ryan voice)", "Clean AI Normal (Ryan voice)", "Clean AI Unhinged (Ryan voice)",
+    "Joe Polite (Joe voice)", "Joe Normal (Joe voice)", "Joe Unhinged (Joe voice)"]
+AiModeIndex(persona, mode) {
+    for i, k in AI_MODE_KEYS
+        if k[1] = persona && k[2] = mode
+            return i
+    return 2
+}
+; which Piper voice goes with the current personality (British uses the Alan quality picked on the Voice tab)
+VoiceBase() => AI.persona = "british" ? "en_GB-alan-" C["voiceQuality"] : AiPersona().voice
+AiModePicked() {
+    k := AI_MODE_KEYS[G.aiMode.Value], oldVoice := VoiceBase()
+    C["aiPersona"] := k[1], C["aiMode"] := k[2], AI.persona := k[1]
+    SaveCfg()
+    G.aiYap.Enabled := C["aiMode"] = "unhinged"
+    AiLog("mode: " AI_MODE_LABELS[G.aiMode.Value] (C["aiMode"] = "unhinged" ? " (in Roblox it's capped to Normal - Roblox doesn't allow swearing)" : ""))
+    try G.voiceName.Text := "Voice for this mode: " VoiceBase() (VoiceHasModel(VoiceBase()) ? "" : "  (not downloaded - Voice tab > Download voice)")
+    if VoiceBase() != oldVoice && VoiceRunning() {
+        if !VoiceHasModel(VoiceBase())
+            return Status("This mode's voice isn't downloaded yet - Voice tab > 2. Download voice (he keeps the old voice until then)")
+        VoiceStop() ; switch voices: restart the voice engine with the new one
+        SetTimer(() => (VoiceStart(C["voiceMonitor"], VoiceBase()), Status("Voice switched to " VoiceBase())), -2000)
+    }
+}
+
 AiStatusUpdate() {
     info := AI.gpu ? AiGpuInfo() : ""
     try G.aiState.Text := "AI: " (AI.ready ? "READY on " (AI.gpu ? "GPU " AI.gpuMode : "CPU" (AI.fellBack ? " (the graphics card didn't work)" : "")) : AI.pid ? "loading on " (AI.gpu ? "GPU..." : "CPU...") : "not started")
@@ -2167,7 +2198,7 @@ HeardVoice(name, text) {
         PilotNote(PILOT.heard, text)
         S.aiMadNow := AiMad(text)
         if VoiceRunning() && RegExMatch(StrLower(text), "\b(stop|shut up|wait|hold on|oi)\b") && C["aiInterrupt"] != "finish"
-            VoiceInterrupt(C["voiceMonitor"], C["voiceQuality"])
+            VoiceInterrupt(C["voiceMonitor"], VoiceBase())
         return
     }
     ranting := S.queue.Length > 0
@@ -2179,7 +2210,7 @@ HeardVoice(name, text) {
         if how = "interrupt" {
             S.queue := []
             if VoiceRunning()
-                VoiceInterrupt(C["voiceMonitor"], C["voiceQuality"])
+                VoiceInterrupt(C["voiceMonitor"], VoiceBase())
             AiLog("(interrupted himself)")
             if CurMood().id = "ai" && AiGameMode() = "unhinged"
                 text := text " [you were interrupted mid-rant - be outraged about being cut off]"
@@ -2205,9 +2236,11 @@ ToggleVoice() {
         G.voiceState.Text := "Voice: off"
         return
     }
-    if !VoiceHasModel(C["voiceQuality"]) && !VoiceHasModel("low") && !VoiceHasModel("medium")
+    if !VoiceHasModel(VoiceBase()) && !VoiceHasModel("low") && !VoiceHasModel("medium")
         return Status("Voice: click 'Download voice' first")
-    VoiceStart(C["voiceMonitor"], C["voiceQuality"])
+    if !VoiceHasModel(VoiceBase())
+        Status("This mode's voice (" VoiceBase() ") isn't downloaded yet - using Alan. Voice tab > 2. Download voice")
+    VoiceStart(C["voiceMonitor"], VoiceBase())
     G.voiceBtn.Text := "3. Voice: ON"
     SetTimer(VoiceStatus, 1000)
 }
@@ -2269,8 +2302,8 @@ StartPilot() {
     if !FocusRbx()
         return Status("Autopilot: open the game first")
     StopAuto()
-    if On("pilotVoice") && !VoiceRunning() && (VoiceHasModel("low") || VoiceHasModel("medium")) {
-        VoiceStart(C["voiceMonitor"], C["voiceQuality"])
+    if On("pilotVoice") && !VoiceRunning() && (VoiceHasModel(VoiceBase()) || VoiceHasModel("low") || VoiceHasModel("medium")) {
+        VoiceStart(C["voiceMonitor"], VoiceBase())
         try G.voiceBtn.Text := "3. Voice: ON"
         SetTimer(VoiceStatus, 1000)
     }

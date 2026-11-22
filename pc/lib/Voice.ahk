@@ -6,20 +6,28 @@ global VOICE := {dir: A_LineFile "\..\..\voice", pid: 0, seq: 0, stopN: 0,
 
 VoicePath(f) => VOICE.dir "\" f
 VoiceModel(f) => DATA "\models\voice\" f
-VoiceHasModel(q := "low") => FileExist(VoiceModel("en_GB-alan-" q ".onnx")) && FileExist(VoiceModel("en_GB-alan-" q ".onnx.json"))
+; a voice is a Piper file name like en_GB-alan-low, en_US-ryan-high, en_US-joe-medium ("low"/"medium" still mean Alan)
+VoiceBaseOf(q) => q = "low" || q = "medium" || q = "" ? "en_GB-alan-" (q = "" ? "low" : q) : q
+VoiceHasModel(q := "low") => FileExist(VoiceModel(VoiceBaseOf(q) ".onnx")) && FileExist(VoiceModel(VoiceBaseOf(q) ".onnx.json"))
 VoiceRunning() => VOICE.pid && ProcessExist(VOICE.pid)
 
 VoiceDownload(q := "low") {
+    base := VoiceBaseOf(q)
+    p := StrSplit(base, "-") ; en_US, ryan, high
+    if p.Length < 3
+        return
+    url := "https://huggingface.co/rhasspy/piper-voices/resolve/main/" SubStr(p[1], 1, 2) "/" p[1] "/" p[2] "/" p[3] "/"
     DirCreate(DATA "\models\voice")
     cmd := ""
-    for f in ["en_GB-alan-" q ".onnx", "en_GB-alan-" q ".onnx.json"]
-        cmd .= 'curl.exe -L -C - --fail -o "' VoiceModel(f) '" "' VOICE.url q "/" f '" && '
-    Run(A_ComSpec ' /c "echo Downloading the Piper Alan (' q ') voice for Hyper-Bot... && ' cmd '(echo. & echo Done - you can close this window.) || echo DOWNLOAD FAILED - see the error above & pause"')
+    for f in [base ".onnx", base ".onnx.json"]
+        cmd .= 'curl.exe -L -C - --fail -o "' VoiceModel(f) '" "' url f '" && '
+    Run(A_ComSpec ' /c "echo Downloading the Piper voice ' base ' for Hyper-Bot (one time)... && ' cmd '(echo. & echo Done - you can close this window.) || echo DOWNLOAD FAILED - see the error above & pause"')
 }
 
 VoiceCtl(monitor, quality) {
     DirCreate(VoicePath("io"))
-    FileOpen(VoicePath("io\ctl.txt"), "w", "UTF-8-RAW").Write("monitor=" monitor "`nstop=" VOICE.stopN "`nquality=" quality "`n")
+    base := VoiceBaseOf(quality)
+    FileOpen(VoicePath("io\ctl.txt"), "w", "UTF-8-RAW").Write("monitor=" monitor "`nstop=" VOICE.stopN "`nquality=" (InStr(base, "alan-medium") ? "medium" : "low") "`nvoice=" base "`n")
 }
 
 VoiceStart(monitor, quality) {

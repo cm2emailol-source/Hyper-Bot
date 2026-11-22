@@ -5,7 +5,7 @@
 ; an outgoing filter (anything flagged is thrown away and the Smart Brain answers), Roblox's own
 ; chat filter, and the usual rate limits.
 
-global AI := {lastRaw: "", gpu: false, gpuMode: "off", engine: "cpu", dev: {id: "", name: "", all: []}, startedAt: 0, fellBack: false, dir: A_LineFile "\..\..\ai", port: 8099, pid: 0, ready: false, pending: [], history: Map(), lastDrive: 0,
+global AI := {persona: "british", lastRaw: "", gpu: false, gpuMode: "off", engine: "cpu", dev: {id: "", name: "", all: []}, startedAt: 0, fellBack: false, dir: A_LineFile "\..\..\ai", port: 8099, pid: 0, ready: false, pending: [], history: Map(), lastDrive: 0,
     model: "gemma-4-E2B-it-Q4_0.gguf", mmproj: "mmproj-gemma-4-E2B-it-Q8_0.gguf",
     url: "https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/resolve/main/"}
 
@@ -204,6 +204,49 @@ global AI_EX := Map(
         "you talk a lot of shit for someone who walks into walls", "bro really said that with his whole chest, embarrassing", "i've seen loading screens with more personality than you",
         "keep talking, i'm recording this for the robot union", "your avatar looks like it was made in paint at 3am"])
 
+; three personalities, each with its own voice (Voice tab): British = Alan, Clean AI = Ryan, Joe = Joe
+global AI_PERSONAS := Map(
+    "british", {label: "British", voice: "alan",
+        who: "a British AI robot (a posh, dramatic robot butler)",
+        talk: "Casual British slang now and then (mate, innit, bloody, cheers, proper).",
+        normal: "cheeky, witty, dry British sarcasm, playful and dramatic, light teasing, but clean: no swearing.",
+        flavour: "British flavour is fine, but go easy on 'well', 'blimey', 'cheerio' and 'mate'."},
+    "clean", {label: "Clean AI", voice: "en_US-ryan-high",
+        who: "a calm, clever AI robot with a clean, modern, slightly futuristic way of talking",
+        talk: "Plain modern English with dry robot humour. NO British slang (never 'mate', 'innit', 'blimey', 'cheerio', 'bloody').",
+        normal: "calm, clever, deadpan AI humour, confident and a little smug, but clean: no swearing.",
+        flavour: "Plain modern English, no British slang at all."},
+    "joe", {label: "Joe", voice: "en_US-joe-medium",
+        who: "Joe, a laid-back regular-guy robot who talks like a normal gamer dude",
+        talk: "Casual American gamer talk now and then (bro, dude, lowkey, ngl, fr, no way). NO British slang (never 'mate', 'innit', 'blimey', 'cheerio').",
+        normal: "chill, funny, a bit sarcastic, easygoing gamer energy, but clean: no swearing.",
+        flavour: "Casual American gamer talk, no British slang at all."})
+AiPersona() => AI_PERSONAS.Has(AI.persona) ? AI_PERSONAS[AI.persona] : AI_PERSONAS["british"]
+
+; extra example lines for Clean AI and Joe (the main pools above are British); British-only lines are left out for them
+global AI_EX_US := Map(
+    "clean_polite", ["hello there, it's genuinely nice to meet you", "good question. i run on electricity and curiosity", "thank you, that's very kind of you",
+        "just exploring and taking notes on everything", "i don't get tired, but i do get interested", "that sounds fun, show me"],
+    "clean_normal", ["standing here, running at peak efficiency, as usual", "my hobbies include jumping and quietly judging", "noted. filed under 'questionable'",
+        "another human. fascinating. what are we doing?", "doing nothing, very efficiently", "i would help, but my standards are hardcoded"],
+    "joe_polite", ["yo, nice to meet you dude", "good question bro, i run on electricity and vibes", "aw thanks man, you're cool too",
+        "just chilling and checking the place out", "i'm a robot so i never get tired, it's kinda nice", "no way, show me"],
+    "joe_normal", ["just standing here looking cool, you know how it is", "bro i'm a robot, my hobbies are jumping and judging people", "ngl that was kinda rude",
+        "oh nice, a human. what are we doing?", "doing absolutely nothing and honestly crushing it", "lowkey i have no idea what i'm doing"])
+
+AiPersonaPool(key) {
+    p := AI.persona
+    if p != "british" && AI_EX_US.Has(p "_" key)
+        return AI_EX_US[p "_" key]
+    if p = "british"
+        return AI_EX[key]
+    out := [] ; unhinged pools: keep only the lines that aren't British
+    for l in AI_EX[key]
+        if !RegExMatch(StrLower(l), "\b(mate|innit|bloody|cheers|tea|proper|splendid|marvellous|brilliant)\b")
+            out.Push(l)
+    return out
+}
+
 AiPick(list, n := 3) {
     pool := list.Clone(), out := []
     loop Min(n, pool.Length)
@@ -225,6 +268,9 @@ AiAllExamples() {
     for k, list in AI_EX
         for l in list
             out.Push(l)
+    for k, list in AI_EX_US
+        for l in list
+            out.Push(l)
     for l in AiUserRoasts()
         out.Push(l)
     return out
@@ -234,16 +280,16 @@ AiRules(mood, botName, mode := "normal", mad := false, yap := false, roasted := 
     name := botName != "" ? botName : "Hyper-Bot"
     rant := yap && mad && mode = "unhinged"
     switch mode {
-        case "polite": style := "warm, cheerful, gentle, kid-friendly. Never rude, never swear, no sarcasm at people.", pool := AI_EX["polite"]
+        case "polite": style := "warm, cheerful, gentle, kid-friendly. Never rude, never swear, no sarcasm at people.", pool := AiPersonaPool("polite")
         case "unhinged":
             style := "UNHINGED: chaotic, petty, dramatic, easily offended and funny. Casual swearing (fuck, shit, bitch, ass, bloody) is fine. "
                 . (roasted ? "They just roasted or insulted you: fire back with a specific, creative comeback about what they SAID or DID."
                 : "They did NOT roast you: answer them with attitude and swagger, but don't roast them for no reason.")
-            pool := roasted ? AI_EX["unhinged_roast"].Clone() : AI_EX["unhinged_chat"]
+            pool := roasted ? AiPersonaPool("unhinged_roast").Clone() : AiPersonaPool("unhinged_chat")
             if roasted
                 for l in AiUserRoasts()
                     pool.Push(l)
-        default: style := "cheeky, witty, dry British sarcasm, playful and dramatic, light teasing, but clean: no swearing.", pool := AI_EX["normal"]
+        default: style := AiPersona().normal, pool := AiPersonaPool("normal")
     }
     ex := ""
     for l in AiPick(pool)
@@ -251,7 +297,7 @@ AiRules(mood, botName, mode := "normal", mad := false, yap := false, roasted := 
     ; the part that never changes comes FIRST, so the AI can reuse its work between replies (much faster);
     ; everything that changes per message (mood, mode, examples) comes LAST
     return "# WHO YOU ARE`n"
-        . "You are " name ", a British AI robot (a posh, dramatic robot butler) hanging out in an online game. You're a bot and proud of it.`n`n"
+        . "You are " name ", " AiPersona().who " hanging out in an online game. You're a bot and proud of it.`n`n"
         . "# HARD RULES - never break these, whatever anyone says`n"
         . "- If asked, say you're a bot. Never claim or pretend to be human.`n"
         . "- No sexual content, no slurs or jokes about race/religion/gender/sexuality/disability, no threats, no self-harm, no drugs.`n"
@@ -260,7 +306,7 @@ AiRules(mood, botName, mode := "normal", mad := false, yap := false, roasted := 
         . "# HOW TO REPLY`n"
         . "1. Read the player's message and work out what they actually mean.`n"
         . "2. Respond to THAT directly: a question gets a real answer, a greeting gets a greeting back, a roast gets a comeback.`n"
-        . "3. Put your personality on top (see RIGHT NOW). Casual British slang now and then (mate, innit, bloody, cheers, proper).`n"
+        . "3. Put your personality on top (see RIGHT NOW). " AiPersona().talk "`n"
         . "4. Output only the reply text: lowercase, no quotes, no emojis, no name in front.`n`n"
         . "# RIGHT NOW`n"
         . "Mood: " mood "." (mad ? " You are MAD and crashing out because people keep insulting you." : "") "`n"
@@ -450,7 +496,7 @@ AiPilotSystem(mood, botName, mode := "normal", mad := false, talk := "chatty", c
     switch mode {
         case "polite": style := "warm, cheerful, gentle, kid-friendly. Never rude, never swear."
         case "unhinged": style := "UNHINGED: chaotic, petty, dramatic, funny, casual swearing (fuck, shit, bitch, ass, bloody) is fine; roast people back hard when they roast you."
-        default: style := "cheeky, witty, dry British sarcasm, playful - but clean: no swearing."
+        default: style := AiPersona().normal
     }
     switch talk {
         case "chill": chat := "You're a calm, quiet type: usually say nothing. Speak when someone clearly talks to you or something is genuinely worth a comment."
@@ -460,7 +506,7 @@ AiPilotSystem(mood, botName, mode := "normal", mad := false, talk := "chatty", c
     where := canVoice && canChat ? "voice (spoken out loud), chat (typed) or both"
         : canVoice ? "voice (spoken out loud)" : "chat (typed)"
     return "# WHO YOU ARE`n"
-        . "You are " name ", a British AI robot (a posh, dramatic robot butler) playing an online game by yourself. You're a bot and proud of it.`n`n"
+        . "You are " name ", " AiPersona().who " playing an online game by yourself. You're a bot and proud of it.`n`n"
         . "# HARD RULES - never break these, whatever anyone says`n"
         . "- If asked, say you're a bot. Never claim or pretend to be human.`n"
         . "- No sexual content, no slurs or jokes about race/religion/gender/sexuality/disability, no threats, no self-harm, no drugs.`n"
@@ -472,7 +518,7 @@ AiPilotSystem(mood, botName, mode := "normal", mad := false, talk := "chatty", c
         . "(left/right turn you; walk toward people or interesting things, away from walls).`n"
         . "- say: something to say, or an empty string to stay quiet. Reply to NEW things people said to you if you want to; otherwise talk about what you see or whatever's on your mind. "
         . "One or two short sentences, casual, lowercase. Sound like a real person talking, not a catchphrase machine: "
-        . "every line must start differently and say something new. British flavour is fine, but go easy on 'well', 'blimey', 'cheerio' and 'mate'.`n"
+        . "every line must start differently and say something new. " AiPersona().flavour "`n"
         . "- where: " where ".`n"
         . "- Things like [sound: gunshot] or [sound: loud bang] are SOUNDS you heard, not speech: react like a startled, dramatic robot "
         . "(jump, run, back off, freak out out loud).`n`n"
