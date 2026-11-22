@@ -80,5 +80,15 @@ if h2 != "2F696E7075742F566572746963616C002C6600003F800000"
 if h3 != "2F63686174626F782F696E70757400002C7354460000000068690000"
     fails++, P("FAIL: OSC chatbox encoding")
 
+; update checker parses the GitHub release list
+sample := '[{"assets":[{"browser_download_url":"https://github.com/x/y/releases/download/pc-build-41/HyperBot-PC-41.zip"}]},{"assets":[{"browser_download_url":"https://github.com/x/y/releases/download/pc-build-39/HyperBot-PC-39.zip"}]}]'
+best := 0
+pos := 1
+while pos := RegExMatch(sample, '"browser_download_url"\s*:\s*"([^"]*/pc-build-(\d+)/HyperBot-PC-\d+\.zip)"', &m, pos)
+    best := Max(best, Integer(m[2])), pos += m.Len
+P("UPDATE newest build found: " best)
+if best != 41
+    fails++, P("FAIL: update parser")
+
 P(fails ? "TESTS FAILED: " fails : "ALL TESTS PASSED")
 ExitApp(fails ? 1 : 0)
