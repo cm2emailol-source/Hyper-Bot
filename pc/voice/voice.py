@@ -41,12 +41,12 @@ def find_model():
     if want:
         for d in dirs:
             p = os.path.join(d, want + ".onnx")
-            if os.path.exists(p):
+            if os.path.exists(p) and os.path.exists(p + ".json"):   # both files = fully downloaded
                 return p
     for q in (pref, "low", "medium"):
         for d in dirs:
             p = os.path.join(d, f"en_GB-alan-{q}.onnx")
-            if os.path.exists(p):
+            if os.path.exists(p) and os.path.exists(p + ".json"):
                 return p
     return None
 
