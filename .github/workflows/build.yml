@@ -116,6 +116,10 @@ jobs:
           if (!$url) { exit 1 }
           Invoke-WebRequest $url -OutFile llama.zip
           Expand-Archive llama.zip -DestinationPath pc/ai/llama
+          # GPU version (Vulkan: works with any modern NVIDIA / AMD / Intel graphics card and its normal driver)
+          $vk = gh api "repos/ggml-org/llama.cpp/releases?per_page=20" --jq '[.[].assets[] | select(.name | test("bin-win-vulkan-x64\\.zip$"))][0].browser_download_url'
+          Write-Host "llama.cpp vulkan: $vk"
+          if ($vk) { Invoke-WebRequest $vk -OutFile llama-vk.zip; Expand-Archive llama-vk.zip -DestinationPath pc/ai/llama-vulkan }
           Get-ChildItem pc/ai/llama -Recurse -Filter llama-server.exe | Select-Object FullName
 
       - name: whisper.cpp for Ears (Windows build, official release) + soundcard for the ears helper
@@ -147,7 +151,7 @@ jobs:
           $lic = Get-ChildItem ahk -Recurse -Filter "license*" | Select-Object -First 1
           if ($lic) { Copy-Item $lic.FullName "$d/AutoHotkey_license.txt" }
           # runtime = the big parts that rarely change; its fingerprint decides whether an update needs them
-          $heavy = @("fly/python", "fly/fly_data.npz", "ai/llama", "ears/whisper", "AutoHotkey64.exe")
+          $heavy = @("fly/python", "fly/fly_data.npz", "ai/llama", "ai/llama-vulkan", "ears/whisper", "AutoHotkey64.exe")
           $root = (Resolve-Path $d).Path
           $files = foreach ($h in $heavy) { Get-ChildItem "$d/$h" -Recurse -File | Where-Object { $_.FullName -notmatch "__pycache__" } }
           $sig = ($files | Sort-Object FullName | ForEach-Object { $_.FullName.Substring($root.Length) + ":" + $_.Length }) -join "`n"

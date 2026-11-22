@@ -5,13 +5,14 @@
 ; an outgoing filter (anything flagged is thrown away and the Smart Brain answers), Roblox's own
 ; chat filter, and the usual rate limits.
 
-global AI := {lastRaw: "", dir: A_LineFile "\..\..\ai", port: 8099, pid: 0, ready: false, pending: [], history: Map(), lastDrive: 0,
+global AI := {lastRaw: "", gpu: false, startedAt: 0, fellBack: false, dir: A_LineFile "\..\..\ai", port: 8099, pid: 0, ready: false, pending: [], history: Map(), lastDrive: 0,
     model: "gemma-4-E2B-it-Q4_0.gguf", mmproj: "mmproj-gemma-4-E2B-it-Q8_0.gguf",
     url: "https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/resolve/main/"}
 
 AiPath(f) => AI.dir "\" f
-AiServerExe() {
-    loop files AI.dir "\llama\llama-server.exe", "R"
+; gpu: the Vulkan build (any modern NVIDIA/AMD/Intel card); otherwise the CPU build
+AiServerExe(gpu := false) {
+    loop files AI.dir (gpu ? "\llama-vulkan" : "\llama") "\llama-server.exe", "R"
         return A_LoopFileFullPath
     return ""
 }
@@ -27,17 +28,19 @@ AiDownload() {
     Run(A_ComSpec ' /c "echo Downloading Gemma 4 E2B for Hyper-Bot (about 3.5 GB, one time)... && ' cmd '(echo. & echo Done - you can close this window.) || echo DOWNLOAD FAILED - see the error above & pause"')
 }
 
-AiStart() {
+AiStart(gpu := false) {
     if AI.pid && ProcessExist(AI.pid)
         return true
-    exe := AiServerExe()
+    if gpu && AiServerExe(true) = ""
+        gpu := false
+    exe := AiServerExe(gpu)
     if exe = "" || !AiHasModel()
         return false
     threads := Max(2, EnvGet("NUMBER_OF_PROCESSORS") - 2)
     pid := 0
     Run('"' exe '" -m "' AiModel(AI.model) '" --mmproj "' AiModel(AI.mmproj) '" --host 127.0.0.1 --port ' AI.port
-        . ' -c 4096 -t ' threads ' --no-webui --reasoning-budget 0', AI.dir, "Hide", &pid)
-    AI.pid := pid, AI.ready := false
+        . ' -c 4096 -t ' threads ' --no-webui --reasoning-budget 0' (gpu ? " -ngl 99" : ""), AI.dir, "Hide", &pid)
+    AI.pid := pid, AI.ready := false, AI.gpu := gpu, AI.startedAt := A_TickCount
     SetTimer(AiPoll, 200)
     return true
 }
@@ -264,6 +267,12 @@ AiAsk(messages, cb, maxTokens := 40, temp := 0.9) {
 }
 
 AiPoll() {
+    if AI.gpu && !AI.ready && AI.pid && (!ProcessExist(AI.pid) || A_TickCount - AI.startedAt > 90000) {
+        try ProcessClose(AI.pid)
+        AI.pid := 0, AI.fellBack := true
+        AiStart(false) ; the graphics card didn't work out - use the CPU instead
+        return
+    }
     if !AI.ready && AI.pid {
         try {
             h := ComObject("WinHttp.WinHttpRequest.5.1")
@@ -380,7 +389,8 @@ AiPilotSystem(mood, botName, mode := "normal", mad := false, talk := "chatty", c
         . "# YOUR JOB`n"
         . "You control your own character. Each turn you get what you can see (a screenshot), what you heard people say nearby, "
         . "the chat, and what you did recently. Decide what to do next, like a real player hanging out:`n"
-        . "- move: one of forward, left, right, back, jump, wave, dance, idle (left/right turn you; walk toward people or interesting things, away from walls).`n"
+        . "- moves: a short plan of 1 to 3 moves in order, each one of forward, left, right, back, jump, wave, dance, idle "
+        . "(left/right turn you; walk toward people or interesting things, away from walls).`n"
         . "- say: something to say, or an empty string to stay quiet. Reply to NEW things people said to you if you want to; otherwise talk about what you see or whatever's on your mind. "
         . "One or two short sentences, casual, lowercase, British slang now and then. Don't repeat what you said recently.`n"
         . "- where: " where ".`n`n"
@@ -389,16 +399,26 @@ AiPilotSystem(mood, botName, mode := "normal", mad := false, talk := "chatty", c
         . "Style: " style "`n"
         . "Talking: " chat "`n`n"
         . "# OUTPUT - ONLY this JSON, nothing else:`n"
-        . '{"move":"forward","say":"...","where":"voice"}'
+        . '{"moves":["forward","left"],"say":"...","where":"voice"}'
 }
 
 ; {move, say, where} from the model's answer (tolerant of extra text)
 AiPilotParse(txt) {
-    out := {move: "idle", say: "", where: "voice"}
-    if RegExMatch(txt, 'i)"move"\s*:\s*"([a-z]+)"', &m)
+    out := {move: "idle", moves: [], say: "", where: "voice"}
+    list := ""
+    if RegExMatch(txt, 'is)"moves"\s*:\s*\[([^\]]*)\]', &m)
+        list := m[1]
+    else if RegExMatch(txt, 'i)"move"\s*:\s*"([a-z]+)"', &m)
+        list := '"' m[1] '"'
+    pos := 1
+    while (pos := RegExMatch(list, '"([a-zA-Z]+)"', &mm, pos)) && out.moves.Length < 3 {
+        pos += mm.Len
         for mv in AI_PILOT_MOVES
-            if StrLower(m[1]) = mv
-                out.move := mv
+            if StrLower(mm[1]) = mv
+                out.moves.Push(mv)
+    }
+    if out.moves.Length
+        out.move := out.moves[1]
     if RegExMatch(txt, '"say"\s*:\s*"((?:[^"\\]|\\.)*)"', &m)
         out.say := Trim(StrReplace(StrReplace(m[1], '\"', '"'), "\n", " "))
     if RegExMatch(txt, 'i)"where"\s*:\s*"([a-z]+)"', &m)

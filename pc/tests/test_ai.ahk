@@ -54,7 +54,7 @@ for mode in ["normal", "unhinged"] {
     pu := {role: "user", content: {text: "Situation:`n- Heard nearby (new): someone: hey robot, what are you doing over there?`n- Chat: (nothing new)`n- You recently said: (nothing)`n- You recently did: idle`nDecide your next move.", image: AiShot(0, 0, 800, 450)}}
     Ask("pilot " mode, [ps, pu], 80)
     d := AiPilotParse(answers.Has("pilot " mode) ? answers["pilot " mode] : "")
-    P("   -> move=" d.move " where=" d.where " say=" d.say)
+    P("   -> moves=" (d.moves.Length ? d.moves[1] (d.moves.Length > 1 ? "," d.moves[2] : "") (d.moves.Length > 2 ? "," d.moves[3] : "") : d.move) " where=" d.where " say=" d.say)
 }
 AiStop()
 ok := answers.Has("hello") && answers["hello"] != ""
