@@ -101,6 +101,24 @@ def write_wav(path, x, sr):
         w.writeframes((np.clip(x, -1, 1) * 32767).astype(np.int16).tobytes())
 
 
+def log_error(msg):
+    try:
+        with open(os.path.join(IO, "error.txt"), "a", encoding="utf-8") as f:
+            f.write(time.strftime("%H:%M:%S ") + msg + "\n")
+    except OSError:
+        pass
+
+
+def com_init():
+    """Windows audio (WASAPI) needs COM set up in EVERY thread that touches a sound device."""
+    if os.name == "nt":
+        try:
+            import ctypes
+            ctypes.windll.ole32.CoInitializeEx(None, 0)   # COINIT_MULTITHREADED
+        except Exception:
+            pass
+
+
 def set_state(**kv):
     tmp = os.path.join(IO, "state.tmp")
     with open(tmp, "w", encoding="utf-8") as f:
@@ -140,8 +158,16 @@ def main():
             print(f"VOICE {style}: {len(x) / tts.sr:.1f} s of audio made in {time.time() - t0:.2f} s")
         return
 
-    import soundcard as sc
-    tts = Tts(model)
+    com_init()
+    try:
+        import soundcard as sc
+        if model is None:
+            raise RuntimeError("no voice model found (en_GB-alan-low.onnx) in HyperBot-Data\\models\\voice")
+        tts = Tts(model)
+    except Exception as e:
+        log_error(f"voice engine couldn't start: {e!r}")
+        set_state(speaking=0, cable=0, ready=0, error=1)
+        raise
     speakers = sc.all_speakers()
     cable = next((s for s in speakers if "cable input" in s.name.lower()), None)
     last_seq, stop_seen = 0, None
@@ -150,6 +176,7 @@ def main():
     stop_flag = threading.Event()
 
     def play(dev, x, sr):
+        com_init()
         try:
             with dev.player(samplerate=sr, channels=1, blocksize=1024) as p:
                 step = sr // 10
@@ -157,8 +184,8 @@ def main():
                     if stop_flag.is_set():
                         return
                     p.play(x[i:i + step])
-        except Exception:
-            pass
+        except Exception as e:
+            log_error(f"playing on '{dev.name}' failed: {e!r}")
 
     while True:
         ctl = read_ctl()
@@ -185,7 +212,16 @@ def main():
                 break
             x = render(tts, text, style)
             stop_flag.clear()
-            devs = [d for d in (cable, sc.default_speaker() if c.get("monitor") == "1" else None) if d]
+            mon = None
+            if c.get("monitor") == "1":
+                try:
+                    mon = sc.default_speaker()
+                    if cable and mon.name == cable.name:
+                        log_error("your Windows default output is CABLE Input - set it to your headphones to hear him")
+                        mon = None
+                except Exception as e:
+                    log_error(f"no default speaker: {e!r}")
+            devs = [d for d in (cable, mon) if d]
             if not devs:
                 continue
             set_state(speaking=1, cable=1 if cable else 0, ready=1)

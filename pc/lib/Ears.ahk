@@ -20,7 +20,7 @@ EarsPython() {
 EarsDownload() {
     DirCreate(DATA "\models\ears")
     Run(A_ComSpec ' /c "echo Downloading Whisper base.en for Hyper-Bot (about 150 MB, one time)... && curl.exe -L -C - --fail -o "'
-        . EarsModel(EARS.model) '" "' EARS.url EARS.model '" && echo. && echo Done - you can close this window. && pause"')
+        . EarsModel(EARS.model) '" "' EARS.url EARS.model '" && (echo. & echo Done - you can close this window.) || echo DOWNLOAD FAILED - see the error above & pause"')
 }
 
 EarsStart() {

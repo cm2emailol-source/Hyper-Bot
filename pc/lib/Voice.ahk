@@ -14,7 +14,7 @@ VoiceDownload(q := "low") {
     cmd := ""
     for f in ["en_GB-alan-" q ".onnx", "en_GB-alan-" q ".onnx.json"]
         cmd .= 'curl.exe -L -C - --fail -o "' VoiceModel(f) '" "' VOICE.url q "/" f '" && '
-    Run(A_ComSpec ' /c "echo Downloading the Piper Alan (' q ') voice for Hyper-Bot... && ' cmd 'echo. && echo Done - you can close this window. && pause"')
+    Run(A_ComSpec ' /c "echo Downloading the Piper Alan (' q ') voice for Hyper-Bot... && ' cmd '(echo. & echo Done - you can close this window.) || echo DOWNLOAD FAILED - see the error above & pause"')
 }
 
 VoiceCtl(monitor, quality) {
@@ -30,6 +30,7 @@ VoiceStart(monitor, quality) {
     DirCreate(VoicePath("io"))
     try FileDelete(VoicePath("io\say.txt"))
     try FileDelete(VoicePath("io\state.txt"))
+    try FileDelete(VoicePath("io\error.txt"))
     VOICE.seq := 0
     VoiceCtl(monitor, quality)
     py := A_LineFile "\..\..\fly\python\pythonw.exe"
@@ -70,4 +71,12 @@ VoiceState() {
         if (i := InStr(l, "=")) > 1
             out[SubStr(l, 1, i - 1)] := SubStr(l, i + 1)
     return out
+}
+
+VoiceLastError() {
+    try {
+        lines := StrSplit(Trim(FileRead(VoicePath("io\error.txt"), "UTF-8"), "`r`n"), "`n", "`r")
+        return lines[lines.Length]
+    }
+    return ""
 }

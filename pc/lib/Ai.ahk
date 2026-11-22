@@ -24,7 +24,7 @@ AiDownload() {
     cmd := ""
     for f in [AI.model, AI.mmproj]
         cmd .= 'curl.exe -L -C - --fail -o "' AiModel(f) '" "' AI.url f '" && '
-    Run(A_ComSpec ' /c "echo Downloading Gemma 4 E2B for Hyper-Bot (about 3.5 GB, one time)... && ' cmd 'echo. && echo Done - you can close this window. && pause"')
+    Run(A_ComSpec ' /c "echo Downloading Gemma 4 E2B for Hyper-Bot (about 3.5 GB, one time)... && ' cmd '(echo. & echo Done - you can close this window.) || echo DOWNLOAD FAILED - see the error above & pause"')
 }
 
 AiStart() {

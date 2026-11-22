@@ -25,7 +25,7 @@ CoordMode "Pixel", "Screen"
 SendMode "Event"
 SetKeyDelay 25, 30
 
-global VERSION := "2.1.0"
+global VERSION := "2.2.0"
 global RBX := "ahk_exe RobloxPlayerBeta.exe" ; the game window (changes with the Game selector)
 
 ; ---- games + controls: every action the bot does goes through KEYS (or VRChat OSC)
@@ -2061,11 +2061,14 @@ ToggleVoice() {
 
 VoiceStatus() {
     if !VoiceRunning() {
-        G.voiceState.Text := "Voice: stopped"
+        err := VoiceLastError()
+        G.voiceState.Text := err != "" ? "Voice stopped - " err : "Voice: stopped"
         G.voiceBtn.Text := "3. Voice: OFF"
         return SetTimer(VoiceStatus, 0)
     }
-    st := VoiceState()
+    st := VoiceState(), err := VoiceLastError()
+    if err != ""
+        return G.voiceState.Text := "Voice problem: " err
     G.voiceState.Text := !st.Has("ready") ? "Voice: loading Alan..."
         : "Voice: ready" (st["speaking"] = "1" ? " - SPEAKING" : "") "   |   VB-Cable: " (st["cable"] = "1" ? "found (VRChat mic = CABLE Output)" : "NOT FOUND - install it, or he's only heard on your speakers")
 }
