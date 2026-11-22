@@ -1922,11 +1922,6 @@ AiCudaCheck() {
 }
 
 ; the AI mode menu: 3 personalities x Polite / Normal / Unhinged, each personality with its own voice
-global AI_MODE_KEYS := [["british", "polite"], ["british", "normal"], ["british", "unhinged"],
-    ["clean", "polite"], ["clean", "normal"], ["clean", "unhinged"], ["joe", "polite"], ["joe", "normal"], ["joe", "unhinged"]]
-global AI_MODE_LABELS := ["British Polite (Alan voice)", "British Normal (Alan voice)", "British Unhinged (Alan voice)",
-    "Clean AI Polite (Ryan voice)", "Clean AI Normal (Ryan voice)", "Clean AI Unhinged (Ryan voice)",
-    "Joe Polite (Joe voice)", "Joe Normal (Joe voice)", "Joe Unhinged (Joe voice)"]
 AiModeIndex(persona, mode) {
     for i, k in AI_MODE_KEYS
         if k[1] = persona && k[2] = mode

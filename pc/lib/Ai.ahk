@@ -221,6 +221,11 @@ global AI_PERSONAS := Map(
         talk: "Casual American gamer talk now and then (bro, dude, lowkey, ngl, fr, no way). NO British slang (never 'mate', 'innit', 'blimey', 'cheerio').",
         normal: "chill, funny, a bit sarcastic, easygoing gamer energy, but clean: no swearing.",
         flavour: "Casual American gamer talk, no British slang at all."})
+global AI_MODE_KEYS := [["british", "polite"], ["british", "normal"], ["british", "unhinged"],
+    ["clean", "polite"], ["clean", "normal"], ["clean", "unhinged"], ["joe", "polite"], ["joe", "normal"], ["joe", "unhinged"]]
+global AI_MODE_LABELS := ["British Polite (Alan voice)", "British Normal (Alan voice)", "British Unhinged (Alan voice)",
+    "Clean AI Polite (Ryan voice)", "Clean AI Normal (Ryan voice)", "Clean AI Unhinged (Ryan voice)",
+    "Joe Polite (Joe voice)", "Joe Normal (Joe voice)", "Joe Unhinged (Joe voice)"]
 AiPersona() => AI_PERSONAS.Has(AI.persona) ? AI_PERSONAS[AI.persona] : AI_PERSONAS["british"]
 
 ; extra example lines for Clean AI and Joe (the main pools above are British); British-only lines are left out for them
