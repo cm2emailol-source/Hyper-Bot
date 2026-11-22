@@ -26,7 +26,7 @@ CoordMode "Pixel", "Screen"
 SendMode "Event"
 SetKeyDelay 25, 30
 
-global VERSION := "2.9.1"
+global VERSION := "2.9.2"
 global RBX := "ahk_exe RobloxPlayerBeta.exe" ; the game window (changes with the Game selector)
 
 ; ---- games + controls: every action the bot does goes through KEYS (or VRChat OSC)
@@ -168,8 +168,9 @@ if SELFTEST {
 SetTimer(() => UpdCheck(true), -8000) ; quietly check for a new build shortly after starting
 SetTimer(VisionTick, 500)
 SetTimer(Pump, 400)
+SetTimer(OnBarUpdate, 1000)
 SetTimer(FocusGuard, 250)
-Status("Ready. Open Roblox on your ALT account, then press F8 (Auto) or F9 (Listen).")
+Status("Ready. Open Roblox on your ALT account. F9 = Listen (answers chat), F8 = Auto, F12 = Autopilot (AI), F10 = stop everything.")
 
 ; ------------------------------------------------------------------ hotkeys
 
@@ -364,7 +365,17 @@ CheckChatTest(text) {
 
 QueueChat(text) => S.queue.Push(text)
 
+; is the bot supposed to be doing anything right now? (Listen, Auto or Autopilot)
+BotActive() => S.listening || S.auto || PILOT.on
+
+; bumped on every stop: AI answers that were still on their way when you stopped get dropped
+global STOP_GEN := 0
+
 Pump() {
+    if S.queue.Length && !BotActive() {
+        S.queue := [] ; everything is off: nothing queued gets said
+        return
+    }
     if S.queue.Length && NowMs() >= S.busyUntil && RbxActive() {
         item := S.queue.RemoveAt(1)
         if IsObject(item)
@@ -575,6 +586,8 @@ ToggleListen() {
 StartListening() {
     if !IsRoblox()
         Status("Note: " GAMES[GameId()].label " has no text chat log to read. Hearing voices comes in Phase 2 (ears).")
+    if Trim(C["botName"]) = ""
+        Status("Tip: set the Bot name (Chat & Brain tab) to your ALT's display name, so he never answers his own messages")
     S.listening := true
     brain.Reset()
     G.listen.Text := "Listen: ON (F9)"
@@ -871,6 +884,7 @@ StartAuto() {
     if !WinExist(RBX)
         return Status("Auto: open Roblox first")
     FocusRbx()
+    StopPilot(true) ; Auto and Autopilot both drive the character - only one at a time
     S.auto := true, S.lastIntro := -9999999, S.moodSince := NowMs()
     G.auto.Text := "Auto: ON (F8)"
     SetTimer(AutoTick, -500)
@@ -887,6 +901,8 @@ StopAuto() {
 }
 
 StopAll() {
+    global STOP_GEN
+    STOP_GEN += 1
     StopPilot()
     StopAuto()
     StopFollow()
@@ -895,8 +911,11 @@ StopAll() {
     if S.recording
         ToggleRecord()
     S.queue := []
+    AI.pending := [] ; answers still being written are thrown away
+    if VoiceRunning()
+        VoiceInterrupt(C["voiceMonitor"], C["voiceQuality"]) ; stop talking mid-sentence
     ReleaseAll()
-    Status("STOPPED (F10)")
+    Status("STOPPED (F10) - Autopilot, Auto, Listen and talking are all off")
 }
 
 AutoTick() {
@@ -1092,6 +1111,17 @@ Status(msg) {
     try G.status.Value := FormatTime(, "HH:mm:ss") "  " msg
 }
 
+; one line at the top that always shows what's on, so it's never a mystery why he's talking
+OnBarUpdate() {
+    static last := ""
+    aiTxt := AI.ready ? "READY (" (AI.gpu ? "GPU " AI.gpuMode : "CPU") ")" : AI.pid ? "loading" : "off"
+    yn(v) => v ? "ON" : "off"
+    t := "AI " aiTxt "  ·  Mood " CurMood().label "  ·  Listen " yn(S.listening) "  ·  Auto " yn(S.auto) "  ·  Autopilot " yn(PILOT.on)
+        . "  ·  Ears " yn(EarsRunning()) "  ·  Voice " yn(VoiceRunning()) (Trim(C["botName"]) = "" ? "  ·  SET BOT NAME" : "")
+    if t != last
+        try G.onBar.Text := t, last := t
+}
+
 BuildGui() {
     CYAN := "00A8E0"
     gw := Gui("+AlwaysOnTop +Resize -MaximizeBox", "Hyper-Bot PC " VERSION)
@@ -1114,7 +1144,10 @@ BuildGui() {
     G.game.OnEvent("Change", GamePicked)
     b := gw.AddButton("x+8 yp-1 w78", "Update")
     b.OnEvent("Click", (*) => UpdCheck(false))
-    tab := gw.AddTab3("x10 y44 w560 h500 -Wrap", ["Control", "Autopilot", "Chat && Brain", "Moods && Camera", "Moves", "Fly Brain", "Sync", "AI local", "Voice", "Controls", "About"])
+    gw.SetFont("s9 norm c404040")
+    G.onBar := gw.AddText("x14 y44 w552 h18", "")
+    gw.SetFont("s10 norm c000000")
+    tab := gw.AddTab3("x10 y64 w560 h500 -Wrap", ["Control", "Autopilot", "Chat && Brain", "Moods && Camera", "Moves", "Fly Brain", "Sync", "AI local", "Voice", "Controls", "About"])
 
     ; --- Control
     tab.UseTab(1)
@@ -1455,7 +1488,7 @@ BuildGui() {
     RefreshFollowNames()
     RefreshControls()
     if !SELFTEST
-        gw.Show("w580 h556")
+        gw.Show("w580 h576")
 }
 
 JoinLines(k) {
@@ -1916,17 +1949,19 @@ AiSay(name, msg) {
     for h in hist
         msgs.Push(h)
     msgs.Push({role: "user", content: name " says: " SubStr(msg, 1, 200)})
-    AiAsk(msgs, AiReplied.Bind(name, msg, r.text, mode, msgs, yap, 0), yap ? 110 : 40, yap ? 1.15 : AiTemp(mode))
+    AiAsk(msgs, AiReplied.Bind(name, msg, r.text, mode, msgs, yap, 0, STOP_GEN), yap ? 110 : 40, yap ? 1.15 : AiTemp(mode))
 }
 
-AiReplied(name, msg, fallback, mode, msgs, yap, tries, txt, err) {
+AiReplied(name, msg, fallback, mode, msgs, yap, tries, gen, txt, err) {
+    if gen != STOP_GEN || !BotActive()
+        return AiLog("(answer to " name " dropped - the bot was stopped)")
     if err = "" && AiIsCopy(txt) {
         if tries = 0 { ; copied an example word for word: ask once more for something original
             AiLog("(copied an example line - asking again)")
             m2 := msgs.Clone()
             m2.Push({role: "assistant", content: txt})
             m2.Push({role: "user", content: "That's one of your example lines word for word. Reply again to the same message with something brand new."})
-            return AiAsk(m2, AiReplied.Bind(name, msg, fallback, mode, msgs, yap, 1), yap ? 110 : 40, 1.1)
+            return AiAsk(m2, AiReplied.Bind(name, msg, fallback, mode, msgs, yap, 1, gen), yap ? 110 : 40, 1.1)
         }
         err := "copied an example twice"
     }
@@ -2084,6 +2119,8 @@ EarsTick() {
         if own != "" && (InStr(StrLower(heard), SubStr(own, 1, 25)) || InStr(own, StrLower(SubStr(heard, 1, 25))))
             return
     AiLog("HEARD: " heard)
+    if !BotActive()
+        return ; Ears can stay on, but he only answers while Listen, Auto or Autopilot is on
     if S.flyOn
         return FlyHears("voice", heard)
     HeardVoice("someone", heard)
@@ -2179,7 +2216,7 @@ EditRoasts() {
 ; ------------------------------------------------------------------ AI Autopilot
 
 global PILOT := {on: false, plan: [], askedAt: 0, heard: [], chat: [], mine: [], did: [], lastDecision: 0, lastIntro: -9999999,
-    voiceTimes: [], chatTimes: [], seen: 0, decisions: 0, waiting: false, lastVibe: ""}
+    voiceTimes: [], chatTimes: [], seen: 0, decisions: 0, waiting: false, lastVibe: "", startedEars: false, startedListen: false}
 
 PilotNote(list, text, keep := 6) {
     list.Push({t: NowMs(), text: SubStr(text, 1, 160)})
@@ -2208,12 +2245,14 @@ StartPilot() {
         try G.voiceBtn.Text := "3. Voice: ON"
         SetTimer(VoiceStatus, 1000)
     }
+    PILOT.startedEars := false, PILOT.startedListen := false
     if !EarsRunning() && EarsServerExe() != "" && EarsHasModel() {
         EarsStart(), SetTimer(EarsTick, 300)
         try G.earsBtn.Text := "Ears: ON"
+        PILOT.startedEars := true
     }
     if !S.listening && IsRoblox()
-        StartListening()
+        StartListening(), PILOT.startedListen := true
     PILOT.on := true, PILOT.heard := [], PILOT.chat := [], PILOT.mine := [], PILOT.did := [], PILOT.lastDecision := 0, PILOT.waiting := false
     PILOT.lastIntro := NowMs()
     G.pilotBtn.Text := "Autopilot: ON (F12)"
@@ -2226,8 +2265,18 @@ StartPilot() {
 StopPilot(manual := false) {
     if !PILOT.on
         return
-    PILOT.on := false
+    global STOP_GEN
+    STOP_GEN += 1
+    PILOT.on := false, PILOT.waiting := false
     SetTimer(PilotTick, 0)
+    ; turn off what Autopilot switched on by itself (Listen, Ears) - it was a mess when they kept running
+    if PILOT.startedListen && S.listening
+        StopListening()
+    if PILOT.startedEars && EarsRunning() {
+        EarsStop(), SetTimer(EarsTick, 0)
+        try G.earsBtn.Text := "Ears: OFF"
+    }
+    PILOT.startedListen := false, PILOT.startedEars := false
     ReleaseAll()
     try G.pilotBtn.Text := "Autopilot: OFF (F12)"
     PilotLog("Autopilot OFF")
@@ -2278,12 +2327,12 @@ PilotTick() {
     mode := AiGameMode()
     PILOT.askedAt := NowMs(), PILOT.waiting := true
     sys := AiPilotSystem(CurMood().label, C["botName"], mode, S.aiMadNow, C["pilotTalk"], On("pilotVoice") && VoiceRunning(), On("pilotChat"))
-    AiAsk([{role: "system", content: sys}, {role: "user", content: content}], PilotDecided.Bind(mode, PILOT.askedAt), 80, AiTemp(mode))
+    AiAsk([{role: "system", content: sys}, {role: "user", content: content}], PilotDecided.Bind(mode, PILOT.askedAt, STOP_GEN), 80, AiTemp(mode))
 }
 
-PilotDecided(mode, askedAt, txt, err) {
+PilotDecided(mode, askedAt, gen, txt, err) {
     PILOT.waiting := false
-    if !PILOT.on
+    if !PILOT.on || gen != STOP_GEN
         return
     if err != "" || txt = ""
         return PilotLog("(no decision: " (err != "" ? err : "empty answer") ")")
