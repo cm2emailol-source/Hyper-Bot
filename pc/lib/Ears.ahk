@@ -10,16 +10,17 @@ EarsServerExe() {
         return A_LoopFileFullPath
     return ""
 }
-EarsHasModel() => FileExist(EarsPath("models\" EARS.model))
+EarsModel(f) => DATA "\models\ears\" f
+EarsHasModel() => FileExist(EarsModel(EARS.model))
 EarsPython() {
     p := A_LineFile "\..\..\fly\python\pythonw.exe"
     return FileExist(p) ? p : "pythonw"
 }
 
 EarsDownload() {
-    DirCreate(EarsPath("models"))
+    DirCreate(DATA "\models\ears")
     Run(A_ComSpec ' /c "echo Downloading Whisper base.en for Hyper-Bot (about 150 MB, one time)... && curl.exe -L -C - --fail -o "'
-        . EarsPath("models\" EARS.model) '" "' EARS.url EARS.model '" && echo. && echo Done - you can close this window. && pause"')
+        . EarsModel(EARS.model) '" "' EARS.url EARS.model '" && echo. && echo Done - you can close this window. && pause"')
 }
 
 EarsStart() {
@@ -33,7 +34,7 @@ EarsStart() {
     FileOpen(EarsPath("io\ctl.txt"), "w", "UTF-8-RAW").Write("pause=0`n")
     threads := Max(2, EnvGet("NUMBER_OF_PROCESSORS") // 3)
     pid := 0
-    Run('"' exe '" -m "' EarsPath("models\" EARS.model) '" --host 127.0.0.1 --port 8098 -t ' threads, EARS.dir, "Hide", &pid)
+    Run('"' exe '" -m "' EarsModel(EARS.model) '" --host 127.0.0.1 --port 8098 -t ' threads, EARS.dir, "Hide", &pid)
     EARS.serverPid := pid
     pid := 0
     Run('"' EarsPython() '" "' EarsPath("ears.py") '"', EARS.dir, "Hide", &pid)

@@ -5,14 +5,15 @@ global VOICE := {dir: A_LineFile "\..\..\voice", pid: 0, seq: 0, stopN: 0,
     url: "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/alan/"}
 
 VoicePath(f) => VOICE.dir "\" f
-VoiceHasModel(q := "low") => FileExist(VoicePath("models\en_GB-alan-" q ".onnx")) && FileExist(VoicePath("models\en_GB-alan-" q ".onnx.json"))
+VoiceModel(f) => DATA "\models\voice\" f
+VoiceHasModel(q := "low") => FileExist(VoiceModel("en_GB-alan-" q ".onnx")) && FileExist(VoiceModel("en_GB-alan-" q ".onnx.json"))
 VoiceRunning() => VOICE.pid && ProcessExist(VOICE.pid)
 
 VoiceDownload(q := "low") {
-    DirCreate(VoicePath("models"))
+    DirCreate(DATA "\models\voice")
     cmd := ""
     for f in ["en_GB-alan-" q ".onnx", "en_GB-alan-" q ".onnx.json"]
-        cmd .= 'curl.exe -L -C - --fail -o "' VoicePath("models\" f) '" "' VOICE.url q "/" f '" && '
+        cmd .= 'curl.exe -L -C - --fail -o "' VoiceModel(f) '" "' VOICE.url q "/" f '" && '
     Run(A_ComSpec ' /c "echo Downloading the Piper Alan (' q ') voice for Hyper-Bot... && ' cmd 'echo. && echo Done - you can close this window. && pause"')
 }
 

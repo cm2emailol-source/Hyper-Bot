@@ -30,10 +30,14 @@ def find_model():
                 pref = "medium"
     except OSError:
         pass
+    dirs = [os.path.join(HERE, "models")]
+    if os.environ.get("HYPERBOT_DATA"):
+        dirs.insert(0, os.path.join(os.environ["HYPERBOT_DATA"], "models", "voice"))   # shared folder first
     for q in (pref, "low", "medium"):
-        p = os.path.join(HERE, "models", f"en_GB-alan-{q}.onnx")
-        if os.path.exists(p):
-            return p
+        for d in dirs:
+            p = os.path.join(d, f"en_GB-alan-{q}.onnx")
+            if os.path.exists(p):
+                return p
     return None
 
 

@@ -226,7 +226,7 @@ def main():
 
     G = b.G
     learner = Learner(b)
-    mem_path = os.path.join(HERE, "fly_memory.npz")
+    mem_path = os.path.join(os.environ.get("HYPERBOT_DATA") or HERE, "fly_memory.npz")
     baseline = {}                                        # odour -> first avoidance index (before learning)
     try:
         m = np.load(mem_path)

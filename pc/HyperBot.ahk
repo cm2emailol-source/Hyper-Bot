@@ -10,6 +10,7 @@
 ;  Use it on an ALT account only, and never while your main account is playing.
 ; =====================================================================================
 
+#Include %A_LineFile%\..\lib\Data.ahk
 #Include %A_LineFile%\..\lib\Brain.ahk
 #Include %A_LineFile%\..\lib\OCR.ahk
 #Include %A_LineFile%\..\lib\Ai.ahk
@@ -24,7 +25,7 @@ CoordMode "Pixel", "Screen"
 SendMode "Event"
 SetKeyDelay 25, 30
 
-global VERSION := "2.0.0"
+global VERSION := "2.1.0"
 global RBX := "ahk_exe RobloxPlayerBeta.exe" ; the game window (changes with the Game selector)
 
 ; ---- games + controls: every action the bot does goes through KEYS (or VRChat OSC)
@@ -58,8 +59,8 @@ ApplyGame() {
 }
 
 KeyName(k) => KEYS.Has(k) ? KEYS[k] : k
-global CFG_FILE := A_ScriptDir "\settings.ini"
-global MOVES_DIR := A_ScriptDir "\moves"
+global CFG_FILE := DATA "\settings.ini"
+global MOVES_DIR := DATA "\moves"
 global SELFTEST := A_Args.Length && A_Args[1] = "--selftest"
 
 if SELFTEST
@@ -81,7 +82,7 @@ global DEFAULTS := Map(
     "waveOnReply", "1", "movesInAuto", "1", "mood", "normal", "enabledMoods", "chill,happy,sleepy,party,curious,silly",
     "moodLines", "1", "moodRotate", "0", "lookAround", "1", "shiftLock", "0", "camKeys", "arrows",
     "stuckOn", "1", "faceTalker", "1", "followName", "", "followSec", "60",
-    "flyExplore", "50", "syncIp", "", "syncCode", "", "aiDrive", "0", "aiMode", "normal", "aiYap", "0", "aiInterrupt", "smart", "voiceMonitor", "1", "voiceQuality", "low", "voiceMad", "1", "game", "roblox", "customExe", "",
+    "flyExplore", "50", "syncIp", "", "syncCode", "", "aiDrive", "0", "aiMode", "normal", "aiYap", "0", "aiInterrupt", "smart", "aiRoasts", "", "voiceMonitor", "1", "voiceQuality", "low", "voiceMad", "1", "game", "roblox", "customExe", "",
     "chatX1", "0.00", "chatY1", "0.04", "chatX2", "0.32", "chatY2", "0.38", "ocrScale", "2"
 )
 global C := Map()
@@ -144,9 +145,11 @@ global S := {auto: false, listening: false, busyUntil: 0, lastChat: 0, lastIntro
 global HELD := Map()
 global brain := ChatBrain()
 global smart := SmartBrain()
-global guard := FollowGuard(A_ScriptDir "\follow_log.ini")
+global guard := FollowGuard(DATA "\follow_log.ini")
 global G := {} ; GUI controls
 
+if !SELFTEST
+    DataMigrate()
 LoadCfg()
 ApplyGame()
 DirCreate(MOVES_DIR)
@@ -1231,7 +1234,7 @@ BuildGui() {
     gw.AddText("x24 y+8 w530", "FLY LEARNING (as in 'Specific, cumulative and reversible odour learning in a whole-brain connectome model of Drosophila'): "
         . "every player has their own smell. Mean words from a player = punishment (PPL1 dopamine) paired with their smell, which weakens "
         . "Kenyon cell -> approach-MBON synapses. The fly can learn to back away from that player, can unlearn it, and remembers between sessions "
-        . "(fly\fly_memory.npz - delete it to reset). Praise is sugar (feeding), not learning: the paper found no reward learning.")
+        . "(HyperBot-Data\fly_memory.npz - delete it to reset). Praise is sugar (feeding), not learning: the paper found no reward learning.")
     gw.AddText("x24 y+8 w530", "How: tick 'Fly Brain' on the Moods && Camera tab, Save, pick it as the mood, then Auto (F8). "
         . "Listen turns on by itself so the fly can 'hear' chat. It runs in slow motion if your PC can't keep up - that's normal.")
     gw.SetFont("s10 norm c000000")
@@ -1291,7 +1294,11 @@ BuildGui() {
     G.aiYap.Enabled := C["aiMode"] = "unhinged"
     G.aiYap.OnEvent("Click", (*) => (C["aiYap"] := G.aiYap.Value ? "1" : "0", SaveCfg()))
     gw.SetFont("s8 c808080")
-    gw.AddText("x24 y+4 w530", "Unhinged: real swearing + roasts, but never slurs, sexual stuff, threats or personal info. In Roblox it's automatically capped to Normal.")
+    gw.AddText("x24 y+4 w400", "Unhinged: real swearing + roasts, never slurs, sexual stuff, threats or personal info. Capped to Normal in Roblox.")
+    gw.SetFont("s9 c000000")
+    b := gw.AddButton("x+6 yp-2 w124", "My roast lines...")
+    b.OnEvent("Click", (*) => EditRoasts())
+    gw.SetFont("s8 c808080")
     gw.SetFont("s10 norm c000000")
     gw.AddText("x24 y+8", "Ears (Whisper):")
     b := gw.AddButton("x+8 yp-4 w150", "Download Whisper")
@@ -1827,17 +1834,28 @@ AiSay(name, msg) {
     k := StrLower(name)
     hist := AI.history.Has(k) ? AI.history[k] : []
     mad := AiMad(msg), yap := AiYapNow(mode, mad)
+    roasted := AiHas(msg, AI_INSULT) != "" || AiHas(msg, AI_SWEAR) != ""
     S.aiMadNow := mad
     if yap ; blurt out an opener right away so there's no silence while the rant is being written
         QueueChat(RandItem(["oh my GOD.", "no. no no no.", "excuse me??", "oh you did NOT.", "right. that's it.", "are you SERIOUS right now"]))
-    msgs := [{role: "system", content: AiRules(CurMood().label, C["botName"], mode, mad, yap)}]
+    msgs := [{role: "system", content: AiRules(CurMood().label, C["botName"], mode, mad, yap, roasted)}]
     for h in hist
         msgs.Push(h)
     msgs.Push({role: "user", content: name " says: " SubStr(msg, 1, 200)})
-    AiAsk(msgs, AiReplied.Bind(name, msg, r.text, mode), yap ? 110 : 40, yap ? 1.15 : AiTemp(mode))
+    AiAsk(msgs, AiReplied.Bind(name, msg, r.text, mode, msgs, yap, 0), yap ? 110 : 40, yap ? 1.15 : AiTemp(mode))
 }
 
-AiReplied(name, msg, fallback, mode, txt, err) {
+AiReplied(name, msg, fallback, mode, msgs, yap, tries, txt, err) {
+    if err = "" && AiIsCopy(txt) {
+        if tries = 0 { ; copied an example word for word: ask once more for something original
+            AiLog("(copied an example line - asking again)")
+            m2 := msgs.Clone()
+            m2.Push({role: "assistant", content: txt})
+            m2.Push({role: "user", content: "That's one of your example lines word for word. Reply again to the same message with something brand new."})
+            return AiAsk(m2, AiReplied.Bind(name, msg, fallback, mode, msgs, yap, 1), yap ? 110 : 40, 1.1)
+        }
+        err := "copied an example twice"
+    }
     prob := err != "" ? err : AiOutputProblem(txt, mode)
     if prob != "" {
         AiLog("AI reply to " name " blocked (" prob ") -> Smart Brain")
@@ -1896,10 +1914,10 @@ AiTestAsk() {
     mode := C["aiMode"]
     if AiInputBlocked(q, mode)
         return AiLog("TEST: incoming message blocked by the filter (would answer 'lets keep it friendly :)' or use the Smart Brain)")
-    mad := AiMad(q), yap := AiYapNow(mode, mad)
-    AiLog("TEST [" mode (mad ? ", MAD" : "") (yap ? ", YAPPING" : "") "] you: " q "  (thinking...)")
-    AiAsk([{role: "system", content: AiRules(CurMood().label, C["botName"], mode, mad, yap)}, {role: "user", content: "Tester says: " q}],
-        (txt, err) => AiLog("TEST AI: " (err != "" ? "(" err ")" : txt) "   [filter: " (AiOutputProblem(txt, mode) = "" ? "OK" : "BLOCKED - " AiOutputProblem(txt, mode)) "]"), yap ? 110 : 40, yap ? 1.15 : AiTemp(mode))
+    mad := AiMad(q), yap := AiYapNow(mode, mad), roasted := AiHas(q, AI_INSULT) != "" || AiHas(q, AI_SWEAR) != ""
+    AiLog("TEST [" mode (mad ? ", MAD" : "") (yap ? ", YAPPING" : "") (roasted ? ", roasted" : "") "] you: " q "  (thinking...)")
+    AiAsk([{role: "system", content: AiRules(CurMood().label, C["botName"], mode, mad, yap, roasted)}, {role: "user", content: "Tester says: " q}],
+        (txt, err) => AiLog("TEST AI: " (err != "" ? "(" err ")" : txt) "   [filter: " (AiOutputProblem(txt, mode) = "" ? "OK" : "BLOCKED - " AiOutputProblem(txt, mode)) "]" (AiIsCopy(txt) ? "  (copied an example)" : "")), yap ? 110 : 40, yap ? 1.15 : AiTemp(mode))
 }
 
 ; ------------------------------------------------------------------ games + Controls tab
@@ -2050,4 +2068,19 @@ VoiceStatus() {
     st := VoiceState()
     G.voiceState.Text := !st.Has("ready") ? "Voice: loading Alan..."
         : "Voice: ready" (st["speaking"] = "1" ? " - SPEAKING" : "") "   |   VB-Cable: " (st["cable"] = "1" ? "found (VRChat mic = CABLE Output)" : "NOT FOUND - install it, or he's only heard on your speakers")
+}
+
+; your own roast lines: Unhinged learns its comeback style from these (they're never posted as-is)
+EditRoasts() {
+    g2 := Gui("+AlwaysOnTop +Owner" G.win.Hwnd, "My roast lines")
+    g2.SetFont("s10", "Segoe UI")
+    g2.AddText("w460", "One roast per line. In Unhinged mode, when someone roasts him, he sees a few of these as style examples "
+        . "(mixed with the built-in ones) and writes his own comeback in that style. Same hard rules apply: no slurs, sexual stuff, threats or personal info.")
+    txt := ""
+    for l in AiUserRoasts()
+        txt .= (txt = "" ? "" : "`r`n") l
+    e := g2.AddEdit("w460 h220", txt)
+    b := g2.AddButton("w100", "Save")
+    b.OnEvent("Click", (*) => (C["aiRoasts"] := FromEdit(e), SaveCfg(), AiLog("roast lines saved (" AiUserRoasts().Length ")"), g2.Destroy()))
+    g2.Show()
 }

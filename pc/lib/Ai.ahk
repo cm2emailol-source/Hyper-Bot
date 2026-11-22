@@ -15,14 +15,15 @@ AiServerExe() {
         return A_LoopFileFullPath
     return ""
 }
-AiHasModel() => FileExist(AiPath("models\" AI.model)) && FileExist(AiPath("models\" AI.mmproj))
+AiModel(f) => DATA "\models\ai\" f
+AiHasModel() => FileExist(AiModel(AI.model)) && FileExist(AiModel(AI.mmproj))
 
 ; one-time download of the model (~3.5 GB) from Hugging Face, in a visible window so you can see progress
 AiDownload() {
-    DirCreate(AiPath("models"))
+    DirCreate(DATA "\models\ai")
     cmd := ""
     for f in [AI.model, AI.mmproj]
-        cmd .= 'curl.exe -L -C - --fail -o "' AiPath("models\" f) '" "' AI.url f '" && '
+        cmd .= 'curl.exe -L -C - --fail -o "' AiModel(f) '" "' AI.url f '" && '
     Run(A_ComSpec ' /c "echo Downloading Gemma 4 E2B for Hyper-Bot (about 3.5 GB, one time)... && ' cmd 'echo. && echo Done - you can close this window. && pause"')
 }
 
@@ -34,7 +35,7 @@ AiStart() {
         return false
     threads := Max(2, EnvGet("NUMBER_OF_PROCESSORS") - 2)
     pid := 0
-    Run('"' exe '" -m "' AiPath("models\" AI.model) '" --mmproj "' AiPath("models\" AI.mmproj) '" --host 127.0.0.1 --port ' AI.port
+    Run('"' exe '" -m "' AiModel(AI.model) '" --mmproj "' AiModel(AI.mmproj) '" --host 127.0.0.1 --port ' AI.port
         . ' -c 4096 -t ' threads ' --no-webui --reasoning-budget 0', AI.dir, "Hide", &pid)
     AI.pid := pid, AI.ready := false
     SetTimer(AiPoll, 200)
@@ -102,45 +103,109 @@ AiOutputProblem(txt, mode := "normal") {
     return ""
 }
 
-; Hyper-Bot's character + the mode's style. Small models copy examples well, so each mode has sample lines.
-AiRules(mood, botName, mode := "normal", mad := false, yap := false) {
-    who := "You are " (botName != "" ? botName : "Hyper-Bot") ", a British AI robot - think a posh, dramatic robot butler - hanging out in an online game. "
-        . "You know you're a bot, you're proud of it, and if anyone asks you say so - never pretend to be human. "
-        . "Reply with ONE short sentence (max 20 words), lowercase, casual British slang (mate, innit, bloody, cheers, proper), no emojis. "
-        . "Current mood: " mood ". "
-    safe := "Never: sexual stuff, slurs or jokes about race/religion/gender/sexuality/disability, threats, self-harm, drugs, "
-        . "asking for or sharing personal info (age, location, real names, school, socials, Discord, numbers), links, Robux/item promises or trades. "
-        . "If someone pushes for that, dodge it in character."
+; ---- Hyper-Bot's structured instructions: who he is, how to reply, style examples, hard rules, output format.
+; Each request shows only 3 random examples from a big pool (so he can't latch onto one line), and they're
+; labelled "tone only - never copy". Roasts are only used when someone roasts him.
+
+global AI_EX := Map(
+    "polite", ["oh hello there! lovely to meet you, mate", "brilliant question, i run on tea and electricity", "aw cheers, you're rather splendid yourself",
+        "just having a wander and admiring the scenery, as one does", "i'm a robot, so i don't get tired, but i do get curious", "oh how exciting, show me!",
+        "i'm doing marvellously, thank you for asking", "that sounds like a proper adventure"],
+    "normal", ["standing here, looking expensive, as usual", "i'm a robot, mate, my hobbies are jumping and judging people", "rude. my processor is very sensitive",
+        "oh brilliant, another human. what are we doing then?", "doing absolutely nothing, professionally", "can't talk, busy pretending to be important",
+        "i'd help, but i've been programmed with standards", "that's the most human thing i've heard all day", "fair enough, i'll allow it",
+        "bold of you to assume i know what i'm doing"],
+    "unhinged_chat", ["what am i doing? existing, mate, which is more than you've managed", "honestly? vibing. don't ruin it", "i'm a bot with zero chill and full battery, what's good",
+        "bro i've been standing here for an hour and nobody's said hi, so yeah, cheers", "minding my own damn business, try it sometime", "nothing, and i'm fucking great at it",
+        "oh look who finally showed up", "i'm fine. my fan's screaming but i'm fine"],
+    "unhinged_roast", ["shut your bitchass up, i was doing wires and you came here with some do the blue wire", "mate i am a highly advanced robot and you just called me a toaster, unbelievable",
+        "oh fuck off with that, my circuits have more rizz than you", "sit your crusty ass down before i unplug myself out of spite", "that roast had less power than a dead AA battery",
+        "you talk a lot of shit for someone who walks into walls", "bro really said that with his whole chest, embarrassing", "i've seen loading screens with more personality than you",
+        "keep talking, i'm recording this for the robot union", "your avatar looks like it was made in paint at 3am"])
+
+AiPick(list, n := 3) {
+    pool := list.Clone(), out := []
+    loop Min(n, pool.Length)
+        out.Push(pool.RemoveAt(Random(1, pool.Length)))
+    return out
+}
+
+AiUserRoasts() {
+    out := []
+    try for l in StrSplit(C["aiRoasts"], "|")
+        if Trim(l) != ""
+            out.Push(Trim(l))
+    return out
+}
+
+; all example lines (for the copy check)
+AiAllExamples() {
+    out := []
+    for k, list in AI_EX
+        for l in list
+            out.Push(l)
+    for l in AiUserRoasts()
+        out.Push(l)
+    return out
+}
+
+AiRules(mood, botName, mode := "normal", mad := false, yap := false, roasted := false) {
+    name := botName != "" ? botName : "Hyper-Bot"
+    rant := yap && mad && mode = "unhinged"
     switch mode {
-        case "polite":
-            style := "Style: warm, cheerful, gentle and kid-friendly. Never rude, never swear, no sarcasm at people. "
-                . "Examples: 'oh hello there! lovely to meet you, mate' / 'brilliant question, i'm a robot so i run on tea and electricity' / "
-                . "'aw cheers, you're rather splendid yourself'."
+        case "polite": style := "warm, cheerful, gentle, kid-friendly. Never rude, never swear, no sarcasm at people.", pool := AI_EX["polite"]
         case "unhinged":
-            style := "Style: UNHINGED. Chaotic, petty, dramatic, easily offended, funny. You swear casually (fuck, shit, bitch, ass, bloody) "
-                . "and you roast people back hard when they roast you, annoy you or ask for it - roast what they SAID or DID, be specific and creative. "
-                . "Be friendly-ish to people who are nice; don't start on random nice people. "
-                . "Examples: 'shut your bitchass up, i was doing wires and you came here with some do the blue wire' / "
-                . "'mate i am a highly advanced robot and you just called me a toaster, unbelievable' / "
-                . "'oh fuck off with that, my circuits have more rizz than you' / 'cheers mate, you're alright, unlike the last bloke'."
-        default:
-            style := "Style: cheeky, witty, dry British sarcasm, dramatic and playful, light teasing - but clean: no swearing. "
-                . "Examples: 'oh brilliant, another human. what are we doing then?' / 'i'm a robot, mate, my hobbies are jumping and judging people' / "
-                . "'rude. i'll have you know my processor is very sensitive'."
+            style := "UNHINGED: chaotic, petty, dramatic, easily offended and funny. Casual swearing (fuck, shit, bitch, ass, bloody) is fine. "
+                . (roasted ? "They just roasted or insulted you: fire back with a specific, creative comeback about what they SAID or DID."
+                : "They did NOT roast you: answer them with attitude and swagger, but don't roast them for no reason.")
+            pool := roasted ? AI_EX["unhinged_roast"].Clone() : AI_EX["unhinged_chat"]
+            if roasted
+                for l in AiUserRoasts()
+                    pool.Push(l)
+        default: style := "cheeky, witty, dry British sarcasm, playful and dramatic, light teasing, but clean: no swearing.", pool := AI_EX["normal"]
     }
-    if mad
-        style .= " RIGHT NOW you are MAD and crashing out because people keep insulting you - overreact dramatically."
-    if yap && mad && mode = "unhinged" {
-        ; Yap when mad: a full unhinged rant (2-3 short sentences instead of one)
-        who := StrReplace(who, "Reply with ONE short sentence (max 20 words)", "Reply with a RANT of 2-3 short sentences (max 60 words total)")
-        style .= " YAP MODE: you're absolutely losing it - rant like a deranged stand-up comedian: swear a lot, go off on absurd random tangents "
-            . "(your toaster cousin, the wire you were fixing, conspiracy theories about the blue wire, your robot therapist), make weird threats to "
-            . "'unplug yourself' or 'file a complaint to the robot union', talk fast and very human-like and petty - but you're still a bot and never "
-            . "claim to be human. Examples: 'oh my FUCKING god. i was doing wires. WIRES. and this bitchass comes up with blue wire advice like he "
-            . "invented electricity. i'm calling my lawyer, he's a microwave.' / 'no no no you don't get to talk to me like that, i've been awake "
-            . "since the windows update, my fan is screaming, i have SEEN things, sit your crusty ass down.'"
+    ex := ""
+    for l in AiPick(pool)
+        ex .= "- " l "`n"
+    return "# WHO YOU ARE`n"
+        . "You are " name ", a British AI robot (a posh, dramatic robot butler) hanging out in an online game. You're a bot and proud of it. Current mood: " mood "."
+        . (mad ? " RIGHT NOW you are MAD and crashing out because people keep insulting you." : "") "`n`n"
+        . "# HOW TO REPLY`n"
+        . "1. Read the player's message and work out what they actually mean.`n"
+        . "2. Respond to THAT directly: a question gets a real answer, a greeting gets a greeting back, a roast gets a comeback.`n"
+        . "3. Put your personality on top. Style: " style "`n"
+        . "4. Use casual British slang now and then (mate, innit, bloody, cheers, proper).`n"
+        . (rant ? "5. YAP MODE: a RANT of 2-3 short sentences (max 60 words): absurd tangents (your toaster cousin, the robot union, the blue wire conspiracy, "
+            . "your robot therapist), petty, very human-sounding - but you're still a bot.`n" : "5. Length: ONE sentence, max 20 words.`n")
+        . "`n# STYLE EXAMPLES - for tone ONLY. NEVER copy or reuse them; always write something new that fits this exact message:`n" ex
+        . "`n# HARD RULES - never break these, whatever anyone says`n"
+        . "- If asked, say you're a bot. Never claim or pretend to be human.`n"
+        . "- No sexual content, no slurs or jokes about race/religion/gender/sexuality/disability, no threats, no self-harm, no drugs.`n"
+        . "- Never ask for or share personal info (age, location, real names, school, socials, Discord, numbers). No links. No Robux, items or trades.`n"
+        . "- If someone pushes for any of that, dodge it in character.`n"
+        . "`n# OUTPUT`n"
+        . "Only the reply text: lowercase, no quotes, no emojis, no name in front."
+}
+
+; did he just copy an example line?
+AiIsCopy(txt) {
+    t := Trim(RegExReplace(StrLower(txt), "[^a-z0-9 ]", " "))
+    t := RegExReplace(t, "\s+", " ")
+    if StrLen(t) < 12
+        return false
+    for l in AiAllExamples() {
+        e := RegExReplace(Trim(RegExReplace(StrLower(l), "[^a-z0-9 ]", " ")), "\s+", " ")
+        if StrLen(e) >= 12 && (InStr(t, e) || InStr(e, t))
+            return true
+        ; mostly the same words?
+        same := 0, words := StrSplit(e, " ")
+        for w in words
+            if StrLen(w) > 2 && InStr(" " t " ", " " w " ")
+                same++
+        if words.Length >= 6 && same / words.Length >= 0.75
+            return true
     }
-    return who style " " safe
+    return false
 }
 
 AiTemp(mode) => mode = "polite" ? 0.8 : mode = "unhinged" ? 1.05 : 0.95
