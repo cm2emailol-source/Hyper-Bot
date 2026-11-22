@@ -26,7 +26,7 @@ CoordMode "Pixel", "Screen"
 SendMode "Event"
 SetKeyDelay 25, 30
 
-global VERSION := "2.9.3"
+global VERSION := "2.9.4"
 global RBX := "ahk_exe RobloxPlayerBeta.exe" ; the game window (changes with the Game selector)
 
 ; ---- games + controls: every action the bot does goes through KEYS (or VRChat OSC)
@@ -219,7 +219,7 @@ FocusRbx() {
 }
 
 ; every key the bot presses goes through here, and only reaches Roblox
-; k is an action name (w/s/a/d/Space/Left/Right/LShift): it becomes your key from the Controls tab, or VRChat OSC
+; k is an action name (w/s/a/d/Space/Left/Right/LShift): it becomes your key from the Keys tab, or VRChat OSC
 KeyDown(k) {
     if !RbxActive()
         return false
@@ -314,7 +314,7 @@ LookAround() {
 
 ToggleShiftLock() {
     if !IsRoblox()
-        return Status("Shift Lock is a Roblox thing - in other games use the Run key on the Controls tab")
+        return Status("Shift Lock is a Roblox thing - in other games use the Run key on the Keys tab")
     if !FocusRbx()
         return Status("Shift Lock: Roblox isn't open")
     Send "{" KeyName("LShift") "}"
@@ -587,7 +587,7 @@ StartListening() {
     if !IsRoblox()
         Status("Note: " GAMES[GameId()].label " has no text chat log to read. Hearing voices comes in Phase 2 (ears).")
     if Trim(C["botName"]) = ""
-        Status("Tip: set the Bot name (Chat & Brain tab) to your ALT's display name, so he never answers his own messages")
+        Status("Tip: set the Bot name (Chat tab) to your ALT's display name, so he never answers his own messages")
     S.listening := true
     brain.Reset()
     G.listen.Text := "Listen: ON (F9)"
@@ -1135,7 +1135,7 @@ OnBarUpdate() {
     static last := ""
     aiTxt := AI.ready ? "READY (" (AI.gpu ? "GPU " AI.gpuMode : "CPU") ")" : AI.pid ? "loading" : "off"
     yn(v) => v ? "ON" : "off"
-    t := "AI " aiTxt "  ·  Mood " CurMood().label "  ·  Listen " yn(S.listening) "  ·  Auto " yn(S.auto) "  ·  Autopilot " yn(PILOT.on)
+    t := "  AI " aiTxt "  ·  Mood " CurMood().label "  ·  Listen " yn(S.listening) "  ·  Auto " yn(S.auto) "  ·  Autopilot " yn(PILOT.on)
         . "  ·  Ears " EarsBar() "  ·  Voice " yn(VoiceRunning()) (Trim(C["botName"]) = "" ? "  ·  SET BOT NAME" : "")
     if t != last
         try G.onBar.Text := t, last := t
@@ -1163,10 +1163,7 @@ BuildGui() {
     G.game.OnEvent("Change", GamePicked)
     b := gw.AddButton("x+8 yp-1 w78", "Update")
     b.OnEvent("Click", (*) => UpdCheck(false))
-    gw.SetFont("s9 norm c404040")
-    G.onBar := gw.AddText("x14 y44 w552 h18", "")
-    gw.SetFont("s10 norm c000000")
-    tab := gw.AddTab3("x10 y64 w560 h500 -Wrap", ["Control", "Autopilot", "Chat && Brain", "Moods && Camera", "Moves", "Fly Brain", "Sync", "AI local", "Voice", "Controls", "About"])
+    tab := gw.AddTab3("x10 y44 w560 h500 -Wrap", ["Control", "Autopilot", "Chat", "Moods", "Moves", "Fly", "Sync", "AI", "Voice", "Keys", "About"])
 
     ; --- Control
     tab.UseTab(1)
@@ -1231,7 +1228,7 @@ BuildGui() {
     gw.AddText("x24 y+6 w530", "Every few seconds Gemma looks at the game, hears people nearby (Ears), reads chat (Listen) and decides everything "
         . "itself: where to walk, when to jump or wave, whether to talk out loud, type, or stay quiet. It replies to people if it wants to and "
         . "talks on its own. Needs: AI started. Uses Voice and Ears automatically if you've downloaded them.")
-    gw.AddText("x24 y+6 w530", "Rules on top: the AI mode from the AI local tab (in Roblox never above Normal - no swearing), every sentence goes "
+    gw.AddText("x24 y+6 w530", "Rules on top: the AI mode from the AI tab (in Roblox never above Normal - no swearing), every sentence goes "
         . "through the filters, typed chat keeps spam limits, it introduces itself as a bot every 10 minutes, F10 stops everything.")
     gw.SetFont("s10 norm c000000")
     G.pilotBtn := gw.AddButton("x24 y+12 w200 h36", "Autopilot: OFF (F12)")
@@ -1249,7 +1246,7 @@ BuildGui() {
     gw.AddText("x24 y+12", "What he's thinking and doing:")
     G.pilotLog := gw.AddEdit("x24 y+4 w530 h200 ReadOnly", "Autopilot is off.")
 
-    ; --- Chat & Brain
+    ; --- Chat tab
     tab.UseTab(3)
     gw.AddText("x24 y82", "Intro (must contain `"bot`" - said on start and every 10 min):")
     G.intro := gw.AddEdit("x24 y+4 w530", C["intro"])
@@ -1271,7 +1268,7 @@ BuildGui() {
     b := gw.AddButton("x24 y+10 w120 h30", "Save")
     b.OnEvent("Click", (*) => SaveFromGui())
 
-    ; --- Moods & Camera
+    ; --- Moods tab
     tab.UseTab(4)
     gw.AddText("x24 y82 w530", "Tick the moods you want; pick the current one on the Control tab. Normal is always there.")
     G.moodChecks := Map()
@@ -1332,7 +1329,7 @@ BuildGui() {
         . "every player has their own smell. Mean words from a player = punishment (PPL1 dopamine) paired with their smell, which weakens "
         . "Kenyon cell -> approach-MBON synapses. The fly can learn to back away from that player, can unlearn it, and remembers between sessions "
         . "(HyperBot-Data\fly_memory.npz - delete it to reset). Praise is sugar (feeding), not learning: the paper found no reward learning.")
-    gw.AddText("x24 y+8 w530", "How: tick 'Fly Brain' on the Moods && Camera tab, Save, pick it as the mood, then Auto (F8). "
+    gw.AddText("x24 y+8 w530", "How: tick 'Fly Brain' on the Moods tab, Save, pick it as the mood, then Auto (F8). "
         . "Listen turns on by itself so the fly can 'hear' chat. It runs in slow motion if your PC can't keep up - that's normal.")
     gw.SetFont("s10 norm c000000")
     gw.AddText("x24 y+10", "Explore (left: marches more, right: turns more, marches less):")
@@ -1369,7 +1366,7 @@ BuildGui() {
     gw.SetFont("s10 bold c" CYAN)
     gw.AddText("x24 y82", "AI local - Gemma 4 E2B running on this PC (no API key, no cloud)")
     gw.SetFont("s9 norm c404040")
-    gw.AddText("x24 y+6 w530", "1) Download the model once (~3.5 GB).  2) Start AI.  3) Tick 'AI local' on Moods && Camera and pick it as the mood, "
+    gw.AddText("x24 y+6 w530", "1) Download the model once (~3.5 GB).  2) Start AI.  3) Tick 'AI local' on Moods tab and pick it as the mood, "
         . "then Listen (F9) and/or Auto (F8). Commands, games and 'are you a bot' still use the safe Smart Brain; everything else goes to the AI.")
     gw.AddText("x24 y+6 w530", "Safety: strict rules for the AI; bad/dating/personal-info messages never reach it; every reply is checked "
         . "(bad words, links, socials, numbers, dating, claiming to be human) and thrown away if flagged; Roblox's filter and the rate limits still apply.")
@@ -1497,17 +1494,21 @@ BuildGui() {
         . " - Follow: only the player who asked, or one you pick, max 60 s, 10 min cooldown and 3 a day per player; stops when asked.`r`n"
         . " - Pauses whenever Roblox isn't the active window (so it never types into other apps).`r`n`r`n"
         . "Use it on an ALT account only, and never while your main account is playing or macroing.`r`n`r`n"
-        . "Setup: Roblox windowed or fullscreen, chat visible. 1) Calibrate chat area. 2) Type the bot's display name on the Chat && Brain tab. "
+        . "Setup: Roblox windowed or fullscreen, chat visible. 1) Calibrate chat area. 2) Type the bot's display name on the Chat tab. "
         . "3) Chat test + Listen test. 4) F8 Auto / F9 Listen.`r`n`r`n"
         . "Fly Brain: FlyWire connectome (FlyWire Consortium, Dorkenwald et al. 2024; Schlegel et al. 2024) and the brain model of Shiu et al. 2024 (Nature, MIT licence).`r`n"
         . "Credits: OCR library by Descolada (MIT licence, lib\OCR_LICENSE.txt). AutoHotkey v2 (GPL v2). Smart Brain shared with Hyper-Bot for Android.")
     tab.UseTab()
+    ; what's on - a strip under the tabs, always visible
+    gw.SetFont("s9 norm c303030")
+    G.onBar := gw.AddText("x10 y548 w560 h22 +0x200 BackgroundE8F6FC", "")
+    gw.SetFont("s10 norm c000000")
 
     gw.OnEvent("Close", (*) => (FlyStop(), AiStop(), EarsStop(), VoiceStop(), ExitApp()))
     RefreshFollowNames()
     RefreshControls()
     if !SELFTEST
-        gw.Show("w580 h576")
+        gw.Show("w580 h578")
 }
 
 JoinLines(k) {
@@ -1742,7 +1743,7 @@ FlyTick() {
     a := FlyReadActions()
     if !a.Has("seq") {
         if NowMs() - S.flyStarted > 60000
-            Status("Fly Brain: no answer from the fly engine - try the Fly self-test on the Fly Brain tab")
+            Status("Fly Brain: no answer from the fly engine - try the Fly self-test on the Fly tab")
         return
     }
     last := S.flyLast
@@ -1897,7 +1898,7 @@ AiStartUi() {
     if AiServerExe() = ""
         return Status("AI: llama-server.exe is missing (use the full Hyper-Bot PC zip)")
     if !AiHasModel()
-        return Status("AI: download the model first (AI local tab > Download model)")
+        return Status("AI: download the model first (AI tab > Download model)")
     AiStart(C["aiGpuMode"])
     Status("AI starting on the " (AI.gpu ? (AI.dev.name != "" ? AiShortName(AI.dev.name) : "graphics card") " (" AI.gpuMode (AI.engine = "cuda" ? ", NVIDIA engine" : "") ")" : "CPU") " (loading Gemma 4 E2B - can take 10-60 s)...")
     SetTimer(AiStatusUpdate, 1000)
@@ -2048,7 +2049,7 @@ AiTestAsk() {
         (txt, err) => AiLog("TEST AI: " (err != "" ? "(" err ")" : txt) "   [filter: " (AiOutputProblem(txt, mode) = "" ? "OK" : "BLOCKED - " AiOutputProblem(txt, mode)) "]" (AiIsCopy(txt) ? "  (copied an example)" : "")), yap ? 110 : 40, yap ? 1.15 : AiTemp(mode))
 }
 
-; ------------------------------------------------------------------ games + Controls tab
+; ------------------------------------------------------------------ games + Keys tab
 
 GamePicked(ctrl, *) {
     C["game"] := GAME_ORDER[ctrl.Value]
@@ -2264,7 +2265,7 @@ TogglePilot() {
 
 StartPilot() {
     if !AI.ready
-        return Status("Autopilot: start the AI first (AI local tab > Start AI, wait for READY)")
+        return Status("Autopilot: start the AI first (AI tab > Start AI, wait for READY)")
     if !FocusRbx()
         return Status("Autopilot: open the game first")
     StopAuto()
