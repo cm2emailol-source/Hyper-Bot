@@ -7,6 +7,18 @@ OnError((e, *) => (FileAppend("AI TEST ERROR: " e.Message " line " e.Line "`n", 
 P(s) => FileAppend(s "`n", "*")
 P("filter in (should block): " AiInputBlocked("wanna date me") " " AiInputBlocked("whats ur discord") " | (should pass): " AiInputBlocked("what are you doing"))
 P("filter out: '" AiOutputProblem("im a real person lol") "' '" AiOutputProblem("add me on discord") "' '" AiOutputProblem("my number is 5551234") "' ok='" AiOutputProblem("just hanging out by the wall") "'")
+; GPU path on a machine without a graphics card: must still come up (or fall back to the CPU by itself)
+if AiServerExe(true) != "" {
+    AiStart("light")
+    t0 := A_TickCount
+    while !AI.ready && A_TickCount - t0 < 200000 {
+        AiPoll()
+        Sleep 500
+    }
+    P("GPU light start: ready=" AI.ready " gpu=" AI.gpu " fellBack=" AI.fellBack " in " Round((A_TickCount - t0) / 1000) " s | info: " AiGpuInfo())
+    AiStop()
+    Sleep 1500
+}
 if !AiStart()
     P("AI TEST ERROR: server or model missing"), ExitApp(1)
 t0 := A_TickCount

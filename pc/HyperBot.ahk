@@ -26,7 +26,7 @@ CoordMode "Pixel", "Screen"
 SendMode "Event"
 SetKeyDelay 25, 30
 
-global VERSION := "2.7.1"
+global VERSION := "2.8.0"
 global RBX := "ahk_exe RobloxPlayerBeta.exe" ; the game window (changes with the Game selector)
 
 ; ---- games + controls: every action the bot does goes through KEYS (or VRChat OSC)
@@ -83,7 +83,7 @@ global DEFAULTS := Map(
     "waveOnReply", "1", "movesInAuto", "1", "mood", "normal", "enabledMoods", "chill,happy,sleepy,party,curious,silly",
     "moodLines", "1", "moodRotate", "0", "lookAround", "1", "shiftLock", "0", "camKeys", "arrows",
     "stuckOn", "1", "faceTalker", "1", "followName", "", "followSec", "60",
-    "flyExplore", "50", "syncIp", "", "syncCode", "", "aiDrive", "0", "aiMode", "normal", "aiYap", "0", "aiInterrupt", "smart", "aiRoasts", "", "aiGpu", "1", "pilotTalk", "chatty", "pilotVoice", "1", "pilotChat", "1", "pilotVision", "1", "voiceMonitor", "1", "voiceQuality", "low", "voiceMad", "1", "game", "roblox", "customExe", "",
+    "flyExplore", "50", "syncIp", "", "syncCode", "", "aiDrive", "0", "aiMode", "normal", "aiYap", "0", "aiInterrupt", "smart", "aiRoasts", "", "aiGpu", "1", "aiGpuMode", "light", "pilotTalk", "chatty", "pilotVoice", "1", "pilotChat", "1", "pilotVision", "1", "voiceMonitor", "1", "voiceQuality", "low", "voiceMad", "1", "game", "roblox", "customExe", "",
     "chatX1", "0.00", "chatY1", "0.04", "chatX2", "0.32", "chatY2", "0.38", "ocrScale", "2"
 )
 global C := Map()
@@ -1328,8 +1328,11 @@ BuildGui() {
     b.OnEvent("Click", (*) => AiStartUi())
     b := gw.AddButton("x+8 w110", "Stop AI")
     b.OnEvent("Click", (*) => (AiStop(), Status("AI stopped")))
-    G.aiGpu := gw.AddCheckBox("x+10 yp+5 " (On("aiGpu") ? "Checked" : ""), "Use graphics card")
-    G.aiGpu.OnEvent("Click", (*) => (C["aiGpu"] := G.aiGpu.Value ? "1" : "0", SaveCfg(), Status("Graphics card setting changes at the next Start AI")))
+    gw.AddText("x+10 yp+5", "GPU:")
+    G.aiGpu := gw.AddDropDownList("x+4 yp-3 w62", ["Light", "Full", "Off"])
+    G.aiGpu.Value := C["aiGpuMode"] = "full" ? 2 : C["aiGpuMode"] = "off" ? 3 : 1
+    G.aiGpu.OnEvent("Change", (*) => (C["aiGpuMode"] := ["light", "full", "off"][G.aiGpu.Value], SaveCfg(),
+        Status("GPU mode: " C["aiGpuMode"] " (Light = brain on the graphics card, fits next to a game; Full = everything; Off = CPU). Applies at the next Start AI")))
     G.aiState := gw.AddText("x24 y+8 w530 c808080", "AI: not started")
     G.aiDrive := gw.AddCheckBox("x24 y+6 " (On("aiDrive") ? "Checked" : ""), "AI drives the bot in Auto (looks at the screen every ~15 s and picks walk/turn/jump/emote)")
     G.aiDrive.OnEvent("Click", (*) => (C["aiDrive"] := G.aiDrive.Value ? "1" : "0", SaveCfg()))
@@ -1841,13 +1844,15 @@ AiStartUi() {
         return Status("AI: llama-server.exe is missing (use the full Hyper-Bot PC zip)")
     if !AiHasModel()
         return Status("AI: download the model first (AI local tab > Download model)")
-    AiStart(On("aiGpu"))
-    Status("AI starting on the " (AI.gpu ? "graphics card" : "CPU") " (loading Gemma 4 E2B - can take 10-60 s)...")
+    AiStart(C["aiGpuMode"])
+    Status("AI starting on the " (AI.gpu ? "graphics card (" AI.gpuMode ")" : "CPU") " (loading Gemma 4 E2B - can take 10-60 s)...")
     SetTimer(AiStatusUpdate, 1000)
 }
 
 AiStatusUpdate() {
-    try G.aiState.Text := "AI: " (AI.ready ? "READY on the " (AI.gpu ? "GRAPHICS CARD" : "CPU" (AI.fellBack ? " (graphics card didn't work)" : "")) : AI.pid ? "loading on the " (AI.gpu ? "graphics card..." : "CPU...") : "not started")
+    info := AI.gpu ? AiGpuInfo() : ""
+    try G.aiState.Text := "AI: " (AI.ready ? "READY on the " (AI.gpu ? "GPU (" AI.gpuMode ")" : "CPU" (AI.fellBack ? " (the graphics card didn't work)" : "")) : AI.pid ? "loading on the " (AI.gpu ? "GPU..." : "CPU...") : "not started")
+        . (info != "" ? "  |  " info : "")
         . "   model: " (AiHasModel() ? "downloaded" : "not downloaded")
     if !AI.pid
         SetTimer(AiStatusUpdate, 0)
@@ -2156,7 +2161,7 @@ EditRoasts() {
 
 ; ------------------------------------------------------------------ AI Autopilot
 
-global PILOT := {on: false, plan: [], heard: [], chat: [], mine: [], did: [], lastDecision: 0, lastIntro: -9999999,
+global PILOT := {on: false, plan: [], askedAt: 0, heard: [], chat: [], mine: [], did: [], lastDecision: 0, lastIntro: -9999999,
     voiceTimes: [], chatTimes: [], seen: 0, decisions: 0}
 
 PilotNote(list, text) {
@@ -2251,6 +2256,7 @@ PilotTick() {
             content := {text: sitText, image: img}
     }
     mode := AiGameMode()
+    PILOT.askedAt := NowMs()
     sys := AiPilotSystem(CurMood().label, C["botName"], mode, S.aiMadNow, C["pilotTalk"], On("pilotVoice") && VoiceRunning(), On("pilotChat"))
     AiAsk([{role: "system", content: sys}, {role: "user", content: content}], PilotDecided.Bind(mode), 80, AiTemp(mode))
 }
@@ -2280,7 +2286,7 @@ PilotDecided(mode, txt, err) {
         else
             said := PilotSay(d.say, d.where)
     }
-    PilotLog(JoinArr(d.moves.Length ? d.moves : [d.move], " > ") (said != "" ? "  +  " said : ""))
+    PilotLog("(" Round((NowMs() - PILOT.askedAt) / 1000, 1) " s)  " JoinArr(d.moves.Length ? d.moves : [d.move], " > ") (said != "" ? "  +  " said : ""))
 }
 
 ; does the next move of the current plan

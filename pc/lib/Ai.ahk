@@ -5,7 +5,7 @@
 ; an outgoing filter (anything flagged is thrown away and the Smart Brain answers), Roblox's own
 ; chat filter, and the usual rate limits.
 
-global AI := {lastRaw: "", gpu: false, startedAt: 0, fellBack: false, dir: A_LineFile "\..\..\ai", port: 8099, pid: 0, ready: false, pending: [], history: Map(), lastDrive: 0,
+global AI := {lastRaw: "", gpu: false, gpuMode: "off", startedAt: 0, fellBack: false, dir: A_LineFile "\..\..\ai", port: 8099, pid: 0, ready: false, pending: [], history: Map(), lastDrive: 0,
     model: "gemma-4-E2B-it-Q4_0.gguf", mmproj: "mmproj-gemma-4-E2B-it-Q8_0.gguf",
     url: "https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/resolve/main/"}
 
@@ -28,19 +28,33 @@ AiDownload() {
     Run(A_ComSpec ' /c "echo Downloading Gemma 4 E2B for Hyper-Bot (about 3.5 GB, one time)... && ' cmd '(echo. & echo Done - you can close this window.) || echo DOWNLOAD FAILED - see the error above & pause"')
 }
 
-AiStart(gpu := false) {
+; gpuMode: "off" (CPU), "light" (brain on the graphics card; vision + a smaller memory window stay off it, so it fits
+; next to a game on a 6 GB card) or "full" (everything on the graphics card). Old true/false values still work.
+AiLogFile() => DATA "\ai_server.log"
+
+AiStart(gpuMode := "off") {
     if AI.pid && ProcessExist(AI.pid)
         return true
+    gpuMode := gpuMode = true || gpuMode = 1 ? "light" : gpuMode = false || gpuMode = 0 || gpuMode = "" ? "off" : gpuMode
+    gpu := gpuMode != "off"
     if gpu && AiServerExe(true) = ""
-        gpu := false
+        gpu := false, gpuMode := "off"
     exe := AiServerExe(gpu)
     if exe = "" || !AiHasModel()
         return false
     threads := Max(2, EnvGet("NUMBER_OF_PROCESSORS") - 2)
+    args := ' -m "' AiModel(AI.model) '" --mmproj "' AiModel(AI.mmproj) '" --host 127.0.0.1 --port ' AI.port
+        . ' -t ' threads ' --no-webui --reasoning-budget 0'
+    if gpuMode = "light"
+        args .= " -ngl 99 -c 2048 --no-mmproj-offload"
+    else if gpuMode = "full"
+        args .= " -ngl 99 -c 4096"
+    else
+        args .= " -c 4096"
     pid := 0
-    Run('"' exe '" -m "' AiModel(AI.model) '" --mmproj "' AiModel(AI.mmproj) '" --host 127.0.0.1 --port ' AI.port
-        . ' -c 4096 -t ' threads ' --no-webui --reasoning-budget 0' (gpu ? " -ngl 99" : ""), AI.dir, "Hide", &pid)
-    AI.pid := pid, AI.ready := false, AI.gpu := gpu, AI.startedAt := A_TickCount
+    ; the server's own messages go to HyperBot-Data\ai_server.log (which card it found, how much fitted on it, errors)
+    Run(A_ComSpec ' /c ""' exe '"' args ' > "' AiLogFile() '" 2>&1"', AI.dir, "Hide", &pid)
+    AI.pid := pid, AI.ready := false, AI.gpu := gpu, AI.gpuMode := gpuMode, AI.startedAt := A_TickCount
     SetTimer(AiPoll, 200)
     return true
 }
@@ -48,7 +62,7 @@ AiStart(gpu := false) {
 AiStop() {
     SetTimer(AiPoll, 0)
     if AI.pid && ProcessExist(AI.pid)
-        ProcessClose(AI.pid)
+        RunWait(A_ComSpec ' /c taskkill /F /T /PID ' AI.pid, , "Hide") ; the window AND the AI server inside it
     AI.pid := 0, AI.ready := false, AI.pending := []
 }
 
@@ -268,9 +282,9 @@ AiAsk(messages, cb, maxTokens := 40, temp := 0.9) {
 
 AiPoll() {
     if AI.gpu && !AI.ready && AI.pid && (!ProcessExist(AI.pid) || A_TickCount - AI.startedAt > 90000) {
-        try ProcessClose(AI.pid)
+        try RunWait(A_ComSpec ' /c taskkill /F /T /PID ' AI.pid, , "Hide")
         AI.pid := 0, AI.fellBack := true
-        AiStart(false) ; the graphics card didn't work out - use the CPU instead
+        AiStart("off") ; the graphics card didn't work out - use the CPU instead
         return
     }
     if !AI.ready && AI.pid {
@@ -426,4 +440,22 @@ AiPilotParse(txt) {
     if RegExMatch(txt, 'i)"where"\s*:\s*"([a-z]+)"', &m)
         out.where := StrLower(m[1])
     return out
+}
+
+; what the AI server reported: graphics card name, how much of the model is on it, memory used, errors
+AiGpuInfo() {
+    try txt := FileRead(AiLogFile(), "UTF-8")
+    catch
+        return ""
+    dev := "", layers := "", mem := 0, err := ""
+    if RegExMatch(txt, "ggml_vulkan: 0 = ([^\r\n|(]+)", &m)
+        dev := Trim(m[1])
+    if RegExMatch(txt, "offloaded (\d+)/(\d+) layers to GPU", &m)
+        layers := m[1] "/" m[2] " layers on the card"
+    pos := 1
+    while pos := RegExMatch(txt, "Vulkan0[^\r\n]*?buffer size\s*=\s*([\d.]+) MiB", &m, pos)
+        mem += Number(m[1]), pos += m.Len
+    if RegExMatch(txt, "i)(out of (device )?memory|failed to allocate[^\r\n]*|ErrorOutOfDeviceMemory)", &m)
+        err := "  OUT OF VIDEO MEMORY"
+    return (dev != "" ? dev : "") (layers != "" ? " - " layers : "") (mem ? " - " Round(mem) " MB used" : "") err
 }
