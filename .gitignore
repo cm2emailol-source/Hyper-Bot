@@ -10,3 +10,6 @@ pc/fly/io/
 pc/fly/python/
 __pycache__/
 pc/fly/fly_memory.npz
+pc/ears/io/
+pc/ears/models/
+pc/ears/whisper/

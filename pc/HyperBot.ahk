@@ -14,6 +14,7 @@
 #Include %A_LineFile%\..\lib\OCR.ahk
 #Include %A_LineFile%\..\lib\Ai.ahk
 #Include %A_LineFile%\..\lib\Osc.ahk
+#Include %A_LineFile%\..\lib\Ears.ahk
 
 Persistent
 SetWorkingDir A_ScriptDir
@@ -22,7 +23,7 @@ CoordMode "Pixel", "Screen"
 SendMode "Event"
 SetKeyDelay 25, 30
 
-global VERSION := "1.7.0"
+global VERSION := "1.9.0"
 global RBX := "ahk_exe RobloxPlayerBeta.exe" ; the game window (changes with the Game selector)
 
 ; ---- games + controls: every action the bot does goes through KEYS (or VRChat OSC)
@@ -79,7 +80,7 @@ global DEFAULTS := Map(
     "waveOnReply", "1", "movesInAuto", "1", "mood", "normal", "enabledMoods", "chill,happy,sleepy,party,curious,silly",
     "moodLines", "1", "moodRotate", "0", "lookAround", "1", "shiftLock", "0", "camKeys", "arrows",
     "stuckOn", "1", "faceTalker", "1", "followName", "", "followSec", "60",
-    "flyExplore", "50", "syncIp", "", "syncCode", "", "aiDrive", "0", "aiMode", "normal", "aiYap", "0", "game", "roblox", "customExe", "",
+    "flyExplore", "50", "syncIp", "", "syncCode", "", "aiDrive", "0", "aiMode", "normal", "aiYap", "0", "aiInterrupt", "smart", "game", "roblox", "customExe", "",
     "chatX1", "0.00", "chatY1", "0.04", "chatX2", "0.32", "chatY2", "0.38", "ocrScale", "2"
 )
 global C := Map()
@@ -1289,6 +1290,15 @@ BuildGui() {
     gw.SetFont("s8 c808080")
     gw.AddText("x24 y+4 w530", "Unhinged: real swearing + roasts, but never slurs, sexual stuff, threats or personal info. In Roblox it's automatically capped to Normal.")
     gw.SetFont("s10 norm c000000")
+    gw.AddText("x24 y+8", "Ears (Whisper):")
+    b := gw.AddButton("x+8 yp-4 w150", "Download Whisper")
+    b.OnEvent("Click", (*) => EarsDownload())
+    G.earsBtn := gw.AddButton("x+8 w110", "Ears: OFF")
+    G.earsBtn.OnEvent("Click", (*) => ToggleEars())
+    gw.AddText("x+10 yp+4", "When interrupted:")
+    G.aiInterrupt := gw.AddDropDownList("x+6 yp-3 w100", ["Smart", "Finish first", "Interrupt"])
+    G.aiInterrupt.Value := C["aiInterrupt"] = "finish" ? 2 : C["aiInterrupt"] = "interrupt" ? 3 : 1
+    G.aiInterrupt.OnEvent("Change", (*) => (C["aiInterrupt"] := ["smart", "finish", "interrupt"][G.aiInterrupt.Value], SaveCfg()))
     gw.AddText("x24 y+8", "Test it here (nothing is sent to Roblox - uses the mode exactly as chosen):")
     G.aiTest := gw.AddEdit("x24 y+4 w420", "hi bot what are you doing")
     b := gw.AddButton("x+8 w100", "Ask")
@@ -1339,7 +1349,7 @@ BuildGui() {
         . "Credits: OCR library by Descolada (MIT licence, lib\OCR_LICENSE.txt). AutoHotkey v2 (GPL v2). Smart Brain shared with Hyper-Bot for Android.")
     tab.UseTab()
 
-    gw.OnEvent("Close", (*) => (FlyStop(), AiStop(), ExitApp()))
+    gw.OnEvent("Close", (*) => (FlyStop(), AiStop(), EarsStop(), ExitApp()))
     RefreshFollowNames()
     RefreshControls()
     if !SELFTEST
@@ -1912,4 +1922,62 @@ AiYapNow(mode, mad) {
         return false
     lastRant := A_TickCount
     return true
+}
+
+; ------------------------------------------------------------------ ears: hearing voices (Phase 2)
+
+ToggleEars() {
+    if EarsRunning() {
+        EarsStop(), SetTimer(EarsTick, 0)
+        G.earsBtn.Text := "Ears: OFF"
+        return Status("Ears off")
+    }
+    if EarsServerExe() = ""
+        return Status("Ears: whisper-server.exe is missing (use the full Hyper-Bot PC zip)")
+    if !EarsHasModel()
+        return Status("Ears: click 'Download Whisper' first (about 150 MB)")
+    EarsStart()
+    SetTimer(EarsTick, 300)
+    G.earsBtn.Text := "Ears: ON"
+    Status("Ears on - listening to what plays on this PC (VRChat voices). Tip: mute music/videos.")
+}
+
+EarsTick() {
+    heard := EarsRead()
+    if heard = ""
+        return
+    ; never react to our own words (e.g. the 'hear him' monitor in phase 3)
+    for own in brain.recentOwn
+        if own != "" && (InStr(StrLower(heard), SubStr(own, 1, 25)) || InStr(own, StrLower(SubStr(heard, 1, 25))))
+            return
+    AiLog("HEARD: " heard)
+    if S.flyOn
+        return FlyHears("voice", heard)
+    HeardVoice("someone", heard)
+}
+
+; something was said to the bot by voice: interruption rules, then answer like a chat message
+HeardVoice(name, text) {
+    ranting := S.queue.Length > 0
+    if ranting {
+        how := C["aiInterrupt"]
+        if how = "smart"
+            how := RegExMatch(StrLower(text), "\b(stop|shut up|wait|hold on|hey|bot|robot|listen|oi)\b|\?\s*$")
+                || (C["botName"] != "" && InStr(StrLower(text), StrLower(C["botName"]))) ? "interrupt" : "finish"
+        if how = "interrupt" {
+            S.queue := []
+            AiLog("(interrupted himself)")
+            if CurMood().id = "ai" && AiGameMode() = "unhinged"
+                text := text " [you were interrupted mid-rant - be outraged about being cut off]"
+        }
+    }
+    now := NowMs()
+    cl := {name: name, message: text}
+    if On("commandsOn") {
+        cmd := brain.Command({name: name, message: "bot " text}, C["botName"], now)
+        if cmd != "" && ChatBrain.KNOWN.Has(cmd.name) && cmd.name != "hi" && cmd.name != "hello" && cmd.name != "hey"
+            return RunCommand(cmd, now)
+    }
+    if brain.AllowTalk(name, now)
+        SmartSay(name, text)
 }

@@ -116,6 +116,19 @@ jobs:
           Expand-Archive llama.zip -DestinationPath pc/ai/llama
           Get-ChildItem pc/ai/llama -Recurse -Filter llama-server.exe | Select-Object FullName
 
+      - name: whisper.cpp for Ears (Windows build, official release) + soundcard for the ears helper
+        shell: pwsh
+        run: |
+          $url = gh api "repos/ggml-org/whisper.cpp/releases?per_page=10" --jq '[.[].assets[] | select(.name | test("^whisper-bin-x64\\.zip$"))][0].browser_download_url'
+          Write-Host "whisper.cpp: $url"
+          if (!$url) { exit 1 }
+          Invoke-WebRequest $url -OutFile whisper.zip
+          Expand-Archive whisper.zip -DestinationPath pc/ears/whisper
+          Get-ChildItem pc/ears/whisper -Recurse -Filter whisper-server.exe | Select-Object FullName
+          python -m pip install --quiet soundcard --target pc/fly/python/Lib/site-packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+
       - name: Package
         shell: pwsh
         run: |
@@ -123,6 +136,7 @@ jobs:
           New-Item -ItemType Directory $d -Force | Out-Null
           Copy-Item pc/* $d -Recurse
           Remove-Item "$d/tests" -Recurse
+          Remove-Item "$d/ears/io" -Recurse -ErrorAction SilentlyContinue
           Copy-Item ahk/AutoHotkey64.exe $d
           $lic = Get-ChildItem ahk -Recurse -Filter "license*" | Select-Object -First 1
           if ($lic) { Copy-Item $lic.FullName "$d/AutoHotkey_license.txt" }
@@ -144,3 +158,22 @@ jobs:
           ahk\AutoHotkey64.exe /ErrorStdOut pc\tests\test_ai.ahk > ai.txt 2>&1
           type ai.txt
           findstr /C:"AI TEST OK" ai.txt
+
+      - name: Ears test - Windows' own voice says a sentence, Whisper must hear it
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory pc/ears/models -Force | Out-Null
+          curl.exe -L --fail -s -o pc/ears/models/ggml-base.en.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
+          Add-Type -AssemblyName System.Speech
+          $tts = New-Object System.Speech.Synthesis.SpeechSynthesizer
+          $tts.SetOutputToWaveFile("$PWD\say.wav")
+          $tts.Speak("Hey robot, what are you doing over there?")
+          $tts.Dispose()
+          $srv = (Get-ChildItem pc/ears/whisper -Recurse -Filter whisper-server.exe | Select-Object -First 1).FullName
+          $p = Start-Process $srv -ArgumentList "-m pc/ears/models/ggml-base.en.bin --host 127.0.0.1 --port 8098 -t 4" -PassThru -WindowStyle Hidden
+          Start-Sleep 8
+          $out = & pc/fly/python/python.exe pc/ears/ears.py --file say.wav 2>&1 | Out-String
+          Write-Host $out
+          Stop-Process $p
+          if ($out -notmatch "(?i)robot") { Write-Host "EARS TEST FAILED"; exit 1 } else { Write-Host "EARS TEST OK" }
+          & pc/fly/python/python.exe -c "import soundcard; print('EARS soundcard import OK')"
