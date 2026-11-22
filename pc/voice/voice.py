@@ -110,7 +110,8 @@ def log_error(msg):
 
 
 def com_init():
-    """Windows audio (WASAPI) needs COM set up in EVERY thread that touches a sound device."""
+    """Windows audio (WASAPI) needs COM set up in every EXTRA thread that touches a sound device
+    (soundcard only does it for the thread that imported it). Only call this inside playback threads."""
     if os.name == "nt":
         try:
             import ctypes
@@ -158,9 +159,8 @@ def main():
             print(f"VOICE {style}: {len(x) / tts.sr:.1f} s of audio made in {time.time() - t0:.2f} s")
         return
 
-    com_init()
     try:
-        import soundcard as sc
+        import soundcard as sc   # it sets up Windows audio (COM) for this main thread itself
         if model is None:
             raise RuntimeError("no voice model found (en_GB-alan-low.onnx) in HyperBot-Data\\models\\voice")
         tts = Tts(model)
