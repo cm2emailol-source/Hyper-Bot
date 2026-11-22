@@ -480,8 +480,10 @@ AiPilotSystem(mood, botName, mode := "normal", mad := false, talk := "chatty", c
         . "Mood: " mood "." (mad ? " You're MAD - people keep insulting you." : "") "`n"
         . "Style: " style "`n"
         . "Talking: " chat "`n`n"
-        . "# OUTPUT - ONLY this JSON, nothing else:`n"
-        . '{"moves":[1 to 3 moves],"say":"what you say, or empty","where":"voice"}'
+        . "# OUTPUT - ONLY one JSON object like these, nothing else (pick your own moves and words):`n"
+        . '{"moves":["right","forward"],"say":"...","where":"voice"}`n'
+        . '{"moves":["idle"],"say":"","where":"voice"}`n'
+        . '{"moves":["jump","back","wave"],"say":"...","where":"voice"}'
 }
 
 ; {move, say, where} from the model's answer (tolerant of extra text)
