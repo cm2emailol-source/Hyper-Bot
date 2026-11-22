@@ -126,6 +126,7 @@ jobs:
           Expand-Archive whisper.zip -DestinationPath pc/ears/whisper
           Get-ChildItem pc/ears/whisper -Recurse -Filter whisper-server.exe | Select-Object FullName
           python -m pip install --quiet soundcard --target pc/fly/python/Lib/site-packages
+          python -m pip install --quiet piper-tts --target pc/fly/python/Lib/site-packages
         env:
           GH_TOKEN: ${{ github.token }}
 
@@ -137,6 +138,7 @@ jobs:
           Copy-Item pc/* $d -Recurse
           Remove-Item "$d/tests" -Recurse
           Remove-Item "$d/ears/io" -Recurse -ErrorAction SilentlyContinue
+          Remove-Item "$d/voice/io" -Recurse -ErrorAction SilentlyContinue
           Copy-Item ahk/AutoHotkey64.exe $d
           $lic = Get-ChildItem ahk -Recurse -Filter "license*" | Select-Object -First 1
           if ($lic) { Copy-Item $lic.FullName "$d/AutoHotkey_license.txt" }
@@ -177,3 +179,21 @@ jobs:
           Stop-Process $p
           if ($out -notmatch "(?i)robot") { Write-Host "EARS TEST FAILED"; exit 1 } else { Write-Host "EARS TEST OK" }
           & pc/fly/python/python.exe -c "import soundcard; print('EARS soundcard import OK')"
+
+      - name: Voice test - Piper Alan speaks, Whisper must understand him (normal + mad voice)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory pc/voice/models -Force | Out-Null
+          $u = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/alan/low"
+          curl.exe -L --fail -s -o pc/voice/models/en_GB-alan-low.onnx "$u/en_GB-alan-low.onnx"
+          curl.exe -L --fail -s -o pc/voice/models/en_GB-alan-low.onnx.json "$u/en_GB-alan-low.onnx.json"
+          & pc/fly/python/python.exe pc/voice/voice.py --selftest "$PWD" 2>&1 | Out-String | Write-Host
+          $srv = (Get-ChildItem pc/ears/whisper -Recurse -Filter whisper-server.exe | Select-Object -First 1).FullName
+          $p = Start-Process $srv -ArgumentList "-m pc/ears/models/ggml-base.en.bin --host 127.0.0.1 --port 8098 -t 4" -PassThru -WindowStyle Hidden
+          Start-Sleep 8
+          $a = & pc/fly/python/python.exe pc/ears/ears.py --file voice_normal.wav 2>&1 | Out-String
+          $b = & pc/fly/python/python.exe pc/ears/ears.py --file voice_mad.wav 2>&1 | Out-String
+          Write-Host "normal voice -> $a"
+          Write-Host "mad voice    -> $b"
+          Stop-Process $p
+          if ($a -notmatch "(?i)robot|butler|mate|hello") { Write-Host "VOICE TEST FAILED"; exit 1 } else { Write-Host "VOICE TEST OK" }

@@ -15,6 +15,7 @@
 #Include %A_LineFile%\..\lib\Ai.ahk
 #Include %A_LineFile%\..\lib\Osc.ahk
 #Include %A_LineFile%\..\lib\Ears.ahk
+#Include %A_LineFile%\..\lib\Voice.ahk
 
 Persistent
 SetWorkingDir A_ScriptDir
@@ -23,7 +24,7 @@ CoordMode "Pixel", "Screen"
 SendMode "Event"
 SetKeyDelay 25, 30
 
-global VERSION := "1.9.0"
+global VERSION := "2.0.0"
 global RBX := "ahk_exe RobloxPlayerBeta.exe" ; the game window (changes with the Game selector)
 
 ; ---- games + controls: every action the bot does goes through KEYS (or VRChat OSC)
@@ -80,7 +81,7 @@ global DEFAULTS := Map(
     "waveOnReply", "1", "movesInAuto", "1", "mood", "normal", "enabledMoods", "chill,happy,sleepy,party,curious,silly",
     "moodLines", "1", "moodRotate", "0", "lookAround", "1", "shiftLock", "0", "camKeys", "arrows",
     "stuckOn", "1", "faceTalker", "1", "followName", "", "followSec", "60",
-    "flyExplore", "50", "syncIp", "", "syncCode", "", "aiDrive", "0", "aiMode", "normal", "aiYap", "0", "aiInterrupt", "smart", "game", "roblox", "customExe", "",
+    "flyExplore", "50", "syncIp", "", "syncCode", "", "aiDrive", "0", "aiMode", "normal", "aiYap", "0", "aiInterrupt", "smart", "voiceMonitor", "1", "voiceQuality", "low", "voiceMad", "1", "game", "roblox", "customExe", "",
     "chatX1", "0.00", "chatY1", "0.04", "chatX2", "0.32", "chatY2", "0.38", "ocrScale", "2"
 )
 global C := Map()
@@ -139,7 +140,7 @@ global S := {auto: false, listening: false, busyUntil: 0, lastChat: 0, lastIntro
     recording: false, recStart: 0, recEvents: [], recState: Map(), recentNames: [], lastRead: [],
     flyOn: false, flyPid: 0, flySound: 0, flyPraise: 0, flyInsult: 0, flyWater: 0, flyTouch: 0, flyWind: 0,
     flyPrev: "", flyLast: Map(), flyLastWord: -9999999, flyLastGroomChat: -9999999, flyStarted: 0,
-    flyWallUntil: 0, flyOdour: 0, flyOdourSeq: 0, flyPunish: 0, flySmellOf: Map(), flyFeel: Map(), flyLastSpeaker: ""}
+    flyWallUntil: 0, aiMadNow: false, flyOdour: 0, flyOdourSeq: 0, flyPunish: 0, flySmellOf: Map(), flyFeel: Map(), flyLastSpeaker: ""}
 global HELD := Map()
 global brain := ChatBrain()
 global smart := SmartBrain()
@@ -337,6 +338,8 @@ SendChat(text, test := false) {
         Sleep 90
         Send "{" KeyName("send") "}"
     }
+    if VoiceRunning()
+        VoiceSay(text, S.aiMadNow && On("voiceMad") ? "mad" : "normal")
     S.lastOwnChat := NowMs()
     brain.NoteOwn(text)
     S.busyUntil := Max(S.busyUntil, NowMs() + 500)
@@ -1089,7 +1092,7 @@ BuildGui() {
         if id = GameId()
             G.game.Value := i
     G.game.OnEvent("Change", GamePicked)
-    tab := gw.AddTab3("x10 y44 w560 h500 -Wrap", ["Control", "Chat && Brain", "Moods && Camera", "Moves", "Fly Brain", "Sync", "AI local", "Controls", "About"])
+    tab := gw.AddTab3("x10 y44 w560 h500 -Wrap", ["Control", "Chat && Brain", "Moods && Camera", "Moves", "Fly Brain", "Sync", "AI local", "Voice", "Controls", "About"])
 
     ; --- Control
     tab.UseTab(1)
@@ -1305,8 +1308,43 @@ BuildGui() {
     b.OnEvent("Click", (*) => AiTestAsk())
     G.aiLog := gw.AddEdit("x24 y+8 w530 h90 ReadOnly", "")
 
-    ; --- Controls
+    ; --- Voice (Phase 3)
     tab.UseTab(8)
+    gw.SetFont("s10 bold c" CYAN)
+    gw.AddText("x24 y82", "Voice - he talks out loud (Piper 'Alan', British, offline)")
+    gw.SetFont("s9 norm c404040")
+    gw.AddText("x24 y+6 w530", "How it works: his voice plays into VB-Audio Virtual Cable's 'CABLE Input'; in VRChat set your microphone to "
+        . "'CABLE Output' and everyone hears him. Between sentences the cable is silent. While he talks his ears pause, so he never answers himself. "
+        . "Everything he says in chat is also spoken.")
+    gw.SetFont("s10 norm c000000")
+    b := gw.AddButton("x24 y+10 w200", "1. Get VB-Cable (free, once)")
+    b.OnEvent("Click", (*) => Run("https://vb-audio.com/Cable/"))
+    b := gw.AddButton("x+8 w150", "2. Download voice")
+    b.OnEvent("Click", (*) => VoiceDownload(C["voiceQuality"]))
+    G.voiceBtn := gw.AddButton("x+8 w140", "3. Voice: OFF")
+    G.voiceBtn.OnEvent("Click", (*) => ToggleVoice())
+    gw.AddText("x24 y+12", "Quality:")
+    G.voiceQ := gw.AddDropDownList("x+6 yp-3 w170", ["Alan low (crunchy, funnier)", "Alan medium (cleaner)"])
+    G.voiceQ.Value := C["voiceQuality"] = "medium" ? 2 : 1
+    G.voiceQ.OnEvent("Change", (*) => (C["voiceQuality"] := G.voiceQ.Value = 2 ? "medium" : "low", SaveCfg(), Status("Voice quality: " C["voiceQuality"] " - click Download voice if you don't have it, then restart Voice")))
+    G.voiceMon := gw.AddCheckBox("x+14 yp+3 " (On("voiceMonitor") ? "Checked" : ""), "Hear him (on my speakers)")
+    G.voiceMon.OnEvent("Click", (*) => (C["voiceMonitor"] := G.voiceMon.Value ? "1" : "0", SaveCfg(), VoiceCtl(C["voiceMonitor"], C["voiceQuality"])))
+    G.voiceMad := gw.AddCheckBox("x24 y+12 " (On("voiceMad") ? "Checked" : ""), "Crashing-out voice when he's mad (pitched up, glitchy, crackly)")
+    G.voiceMad.OnEvent("Click", (*) => (C["voiceMad"] := G.voiceMad.Value ? "1" : "0", SaveCfg()))
+    G.voiceState := gw.AddText("x24 y+12 w530 c808080", "Voice: off")
+    gw.AddText("x24 y+12", "Try it:")
+    G.voiceTest := gw.AddEdit("x+8 yp-3 w330", "right then, who's touched my wires")
+    b := gw.AddButton("x+6 w70", "Say")
+    b.OnEvent("Click", (*) => VoiceSay(G.voiceTest.Value, "normal"))
+    b := gw.AddButton("x+6 w70", "Say mad")
+    b.OnEvent("Click", (*) => VoiceSay(G.voiceTest.Value, "mad"))
+    gw.SetFont("s8 c808080")
+    gw.AddText("x24 y+10 w530", "VRChat setup: Settings > Audio > Microphone = 'CABLE Output (VB-Audio Virtual Cable)'. Keep your real mic for yourself in other apps. "
+        . "'Hear him' only copies the sound to your speakers - the bot doesn't know about it.")
+    gw.SetFont("s10 norm c000000")
+
+    ; --- Controls
+    tab.UseTab(9)
     gw.SetFont("s10 bold c" CYAN)
     G.ctlTitle := gw.AddText("x24 y82 w530", "")
     gw.SetFont("s9 norm c404040")
@@ -1332,7 +1370,7 @@ BuildGui() {
     b.OnEvent("Click", (*) => TestControls())
 
     ; --- About
-    tab.UseTab(9)
+    tab.UseTab(10)
     gw.AddEdit("x24 y82 w530 h400 ReadOnly",
         "Hyper-Bot PC " VERSION "`r`n`r`n"
         . "How it works: it only presses keys, moves the mouse and reads the screen with Windows' built-in OCR - like a player. "
@@ -1349,7 +1387,7 @@ BuildGui() {
         . "Credits: OCR library by Descolada (MIT licence, lib\OCR_LICENSE.txt). AutoHotkey v2 (GPL v2). Smart Brain shared with Hyper-Bot for Android.")
     tab.UseTab()
 
-    gw.OnEvent("Close", (*) => (FlyStop(), AiStop(), EarsStop(), ExitApp()))
+    gw.OnEvent("Close", (*) => (FlyStop(), AiStop(), EarsStop(), VoiceStop(), ExitApp()))
     RefreshFollowNames()
     RefreshControls()
     if !SELFTEST
@@ -1789,6 +1827,9 @@ AiSay(name, msg) {
     k := StrLower(name)
     hist := AI.history.Has(k) ? AI.history[k] : []
     mad := AiMad(msg), yap := AiYapNow(mode, mad)
+    S.aiMadNow := mad
+    if yap ; blurt out an opener right away so there's no silence while the rant is being written
+        QueueChat(RandItem(["oh my GOD.", "no. no no no.", "excuse me??", "oh you did NOT.", "right. that's it.", "are you SERIOUS right now"]))
     msgs := [{role: "system", content: AiRules(CurMood().label, C["botName"], mode, mad, yap)}]
     for h in hist
         msgs.Push(h)
@@ -1966,6 +2007,8 @@ HeardVoice(name, text) {
                 || (C["botName"] != "" && InStr(StrLower(text), StrLower(C["botName"]))) ? "interrupt" : "finish"
         if how = "interrupt" {
             S.queue := []
+            if VoiceRunning()
+                VoiceInterrupt(C["voiceMonitor"], C["voiceQuality"])
             AiLog("(interrupted himself)")
             if CurMood().id = "ai" && AiGameMode() = "unhinged"
                 text := text " [you were interrupted mid-rant - be outraged about being cut off]"
@@ -1980,4 +2023,31 @@ HeardVoice(name, text) {
     }
     if brain.AllowTalk(name, now)
         SmartSay(name, text)
+}
+
+; ------------------------------------------------------------------ voice (Phase 3)
+
+ToggleVoice() {
+    if VoiceRunning() {
+        VoiceStop(), SetTimer(VoiceStatus, 0)
+        G.voiceBtn.Text := "3. Voice: OFF"
+        G.voiceState.Text := "Voice: off"
+        return
+    }
+    if !VoiceHasModel(C["voiceQuality"]) && !VoiceHasModel("low") && !VoiceHasModel("medium")
+        return Status("Voice: click 'Download voice' first")
+    VoiceStart(C["voiceMonitor"], C["voiceQuality"])
+    G.voiceBtn.Text := "3. Voice: ON"
+    SetTimer(VoiceStatus, 1000)
+}
+
+VoiceStatus() {
+    if !VoiceRunning() {
+        G.voiceState.Text := "Voice: stopped"
+        G.voiceBtn.Text := "3. Voice: OFF"
+        return SetTimer(VoiceStatus, 0)
+    }
+    st := VoiceState()
+    G.voiceState.Text := !st.Has("ready") ? "Voice: loading Alan..."
+        : "Voice: ready" (st["speaking"] = "1" ? " - SPEAKING" : "") "   |   VB-Cable: " (st["cable"] = "1" ? "found (VRChat mic = CABLE Output)" : "NOT FOUND - install it, or he's only heard on your speakers")
 }

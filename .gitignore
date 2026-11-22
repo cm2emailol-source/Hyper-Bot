@@ -13,3 +13,5 @@ pc/fly/fly_memory.npz
 pc/ears/io/
 pc/ears/models/
 pc/ears/whisper/
+pc/voice/io/
+pc/voice/models/
