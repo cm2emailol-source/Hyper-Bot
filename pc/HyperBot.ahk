@@ -1432,16 +1432,18 @@ BuildGui() {
     b.OnEvent("Click", (*) => (VoiceDownload(VoiceBase()), Status("Downloading the voice for this mode: " VoiceBase())))
     G.voiceBtn := gw.AddButton("x+8 w140", "3. Voice: OFF")
     G.voiceBtn.OnEvent("Click", (*) => ToggleVoice())
-    gw.AddText("x24 y+12", "Quality:")
+    gw.AddText("x24 y+12", "Alan quality:")
     G.voiceQ := gw.AddDropDownList("x+6 yp-3 w170", ["Alan low (crunchy, funnier)", "Alan medium (cleaner)"]) ; British modes only
     G.voiceQ.Value := C["voiceQuality"] = "medium" ? 2 : 1
-    G.voiceQ.OnEvent("Change", (*) => (C["voiceQuality"] := G.voiceQ.Value = 2 ? "medium" : "low", SaveCfg(), Status("Alan quality: " C["voiceQuality"] " (British modes) - click Download voice if you don't have it, then restart Voice")))
+    G.voiceQ.Enabled := AI.persona = "british" ; only Alan (British modes) has two qualities
+    G.voiceQ.OnEvent("Change", (*) => (C["voiceQuality"] := G.voiceQ.Value = 2 ? "medium" : "low", SaveCfg(), Status("Alan quality: " C["voiceQuality"] " - click Download voice if you don't have it, then restart Voice"), VoiceNameUpdate()))
     G.voiceMon := gw.AddCheckBox("x+14 yp+3 " (On("voiceMonitor") ? "Checked" : ""), "Hear him (on my speakers)")
     G.voiceMon.OnEvent("Click", (*) => (C["voiceMonitor"] := G.voiceMon.Value ? "1" : "0", SaveCfg(), VoiceCtl(C["voiceMonitor"], VoiceBase())))
     G.voiceMad := gw.AddCheckBox("x24 y+12 " (On("voiceMad") ? "Checked" : ""), "Crashing-out voice when he's mad (pitched up, glitchy, crackly)")
     G.voiceMad.OnEvent("Click", (*) => (C["voiceMad"] := G.voiceMad.Value ? "1" : "0", SaveCfg()))
     G.voiceState := gw.AddText("x24 y+12 w530 c808080", "Voice: off")
-    G.voiceName := gw.AddText("x24 y+4 w530 c0070A0", "Voice for this mode: " VoiceBase() (VoiceHasModel(VoiceBase()) ? "" : "  (not downloaded - click 2. Download voice)"))
+    G.voiceName := gw.AddText("x24 y+4 w530 c0070A0", "")
+    VoiceNameUpdate()
     gw.AddText("x24 y+12", "Try it:")
     G.voiceTest := gw.AddEdit("x+8 yp-3 w330", "right then, who's touched my wires")
     b := gw.AddButton("x+6 w70", "Say")
@@ -1930,13 +1932,24 @@ AiModeIndex(persona, mode) {
 }
 ; which Piper voice goes with the current personality (British uses the Alan quality picked on the Voice tab)
 VoiceBase() => AI.persona = "british" ? "en_GB-alan-" C["voiceQuality"] : AiPersona().voice
+; "en_US-joe-medium" -> "Joe (medium)"
+VoiceNice(base) {
+    p := StrSplit(base, "-")
+    return p.Length >= 3 ? StrUpper(SubStr(p[2], 1, 1)) SubStr(p[2], 2) " (" p[3] ")" : base
+}
+VoiceNameUpdate() {
+    try G.voiceName.Text := "Voice for the current AI mode (" AiPersona().label "): " VoiceNice(VoiceBase())
+        . (VoiceHasModel(VoiceBase()) ? "  - downloaded" : "  - NOT downloaded yet: click 2. Download voice")
+}
+
 AiModePicked() {
     k := AI_MODE_KEYS[G.aiMode.Value], oldVoice := VoiceBase()
     C["aiPersona"] := k[1], C["aiMode"] := k[2], AI.persona := k[1]
     SaveCfg()
     G.aiYap.Enabled := C["aiMode"] = "unhinged"
     AiLog("mode: " AI_MODE_LABELS[G.aiMode.Value] (C["aiMode"] = "unhinged" ? " (in Roblox it's capped to Normal - Roblox doesn't allow swearing)" : ""))
-    try G.voiceName.Text := "Voice for this mode: " VoiceBase() (VoiceHasModel(VoiceBase()) ? "" : "  (not downloaded - Voice tab > Download voice)")
+    VoiceNameUpdate()
+    try G.voiceQ.Enabled := AI.persona = "british"
     if VoiceBase() != oldVoice && VoiceRunning() {
         if !VoiceHasModel(VoiceBase())
             return Status("This mode's voice isn't downloaded yet - Voice tab > 2. Download voice (he keeps the old voice until then)")
