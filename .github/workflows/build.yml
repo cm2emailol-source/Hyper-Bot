@@ -153,10 +153,10 @@ jobs:
       - name: AI local test with the real model (Gemma 4 E2B, not packaged - users download it once)
         shell: cmd
         run: |
-          mkdir pc\ai\models
-          curl.exe -L --fail -s -o pc\ai\models\gemma-4-E2B-it-Q4_0.gguf https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_0.gguf
-          curl.exe -L --fail -s -o pc\ai\models\mmproj-gemma-4-E2B-it-Q8_0.gguf https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/resolve/main/mmproj-gemma-4-E2B-it-Q8_0.gguf
-          dir pc\ai\models
+          mkdir "%USERPROFILE%\HyperBot-Data\models\ai"
+          curl.exe -L --fail -s -o "%USERPROFILE%\HyperBot-Data\models\ai\gemma-4-E2B-it-Q4_0.gguf" https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_0.gguf
+          curl.exe -L --fail -s -o "%USERPROFILE%\HyperBot-Data\models\ai\mmproj-gemma-4-E2B-it-Q8_0.gguf" https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/resolve/main/mmproj-gemma-4-E2B-it-Q8_0.gguf
+          dir "%USERPROFILE%\HyperBot-Data\models\ai"
           ahk\AutoHotkey64.exe /ErrorStdOut pc\tests\test_ai.ahk > ai.txt 2>&1
           type ai.txt
           findstr /C:"AI TEST OK" ai.txt
