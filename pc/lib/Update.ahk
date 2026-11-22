@@ -55,6 +55,7 @@ UpdInstall(r) {
     DirCreate(tmp)
     app := RegExReplace(A_LineFile, "\\lib\\[^\\]+$")
     bat := tmp "\update.bat"
+    q1 := Chr(39), q2 := Chr(34) ; ' and " for the PowerShell command
     ; the batch waits for Hyper-Bot to close, downloads, unpacks, copies program files over, and restarts it
     FileAppend(
         "@echo off`r`n"
@@ -62,8 +63,8 @@ UpdInstall(r) {
         . "echo Updating Hyper-Bot to build " r.build "... (please wait)`r`n"
         . "timeout /t 2 /nobreak >nul`r`n"
         . 'curl.exe -L --fail -o "' tmp '\new.zip" "' r.url '" || (echo DOWNLOAD FAILED & pause & exit /b 1)' "`r`n"
-        . 'powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Force ''' tmp '\new.zip'' ''' tmp '\new''; '
-        . 'Get-ChildItem -LiteralPath ''' tmp '\new'' -Recurse -File | Unblock-File"' " || (echo UNZIP FAILED & pause & exit /b 1)`r`n"
+        . "powershell -NoProfile -ExecutionPolicy Bypass -Command " q2 "Expand-Archive -Force " q1 tmp "\new.zip" q1 " " q1 tmp "\new" q1 "; "
+        . "Get-ChildItem -LiteralPath " q1 tmp "\new" q1 " -Recurse -File | Unblock-File" q2 " || (echo UNZIP FAILED & pause & exit /b 1)`r`n"
         . 'robocopy "' tmp '\new\HyperBot-PC" "' app '" /E /R:3 /W:1 /NFL /NDL /NJH /NJS /XD io >nul' "`r`n"
         . 'if %ERRORLEVEL% GEQ 8 (echo COPY FAILED - close anything using the Hyper-Bot folder and try again & pause & exit /b 1)' "`r`n"
         . 'start "" "' app '\Start Hyper-Bot.bat"' "`r`n"
