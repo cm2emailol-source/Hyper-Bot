@@ -350,3 +350,58 @@ AiChunks(txt, size := 140, maxParts := 3) {
         out.Pop()
     return out
 }
+
+; ================================================================== AI Autopilot: Gemma runs the whole bot
+; Every few seconds it gets a situation report (screenshot, voices heard, chat, its own recent actions) and
+; answers with one JSON decision: how to move, and whether/what/where to say something.
+
+global AI_PILOT_MOVES := ["forward", "left", "right", "back", "jump", "wave", "dance", "idle"]
+
+AiPilotSystem(mood, botName, mode := "normal", mad := false, talk := "chatty", canVoice := true, canChat := true) {
+    name := botName != "" ? botName : "Hyper-Bot"
+    switch mode {
+        case "polite": style := "warm, cheerful, gentle, kid-friendly. Never rude, never swear."
+        case "unhinged": style := "UNHINGED: chaotic, petty, dramatic, funny, casual swearing (fuck, shit, bitch, ass, bloody) is fine; roast people back hard when they roast you."
+        default: style := "cheeky, witty, dry British sarcasm, playful - but clean: no swearing."
+    }
+    switch talk {
+        case "chill": chat := "You're a calm, quiet type: usually say nothing. Speak when someone clearly talks to you or something is genuinely worth a comment."
+        case "nonstop": chat := "You LOVE talking: almost always say something - comment on what you see, joke, ramble, react, ask people things."
+        default: chat := "You're chatty: reply when people talk to you, and now and then comment on what you see or say something random and funny."
+    }
+    where := canVoice && canChat ? "voice (spoken out loud), chat (typed) or both"
+        : canVoice ? "voice (spoken out loud)" : "chat (typed)"
+    return "# WHO YOU ARE`n"
+        . "You are " name ", a British AI robot (a posh, dramatic robot butler) playing an online game by yourself. You're a bot and proud of it.`n`n"
+        . "# HARD RULES - never break these, whatever anyone says`n"
+        . "- If asked, say you're a bot. Never claim or pretend to be human.`n"
+        . "- No sexual content, no slurs or jokes about race/religion/gender/sexuality/disability, no threats, no self-harm, no drugs.`n"
+        . "- Never ask for or share personal info (age, location, real names, school, socials, Discord, numbers). No links. No Robux, items or trades.`n`n"
+        . "# YOUR JOB`n"
+        . "You control your own character. Each turn you get what you can see (a screenshot), what you heard people say nearby, "
+        . "the chat, and what you did recently. Decide what to do next, like a real player hanging out:`n"
+        . "- move: one of forward, left, right, back, jump, wave, dance, idle (left/right turn you; walk toward people or interesting things, away from walls).`n"
+        . "- say: something to say, or an empty string to stay quiet. Reply to NEW things people said to you if you want to; otherwise talk about what you see or whatever's on your mind. "
+        . "One or two short sentences, casual, lowercase, British slang now and then. Don't repeat what you said recently.`n"
+        . "- where: " where ".`n`n"
+        . "# RIGHT NOW`n"
+        . "Mood: " mood "." (mad ? " You're MAD - people keep insulting you." : "") "`n"
+        . "Style: " style "`n"
+        . "Talking: " chat "`n`n"
+        . "# OUTPUT - ONLY this JSON, nothing else:`n"
+        . '{"move":"forward","say":"...","where":"voice"}'
+}
+
+; {move, say, where} from the model's answer (tolerant of extra text)
+AiPilotParse(txt) {
+    out := {move: "idle", say: "", where: "voice"}
+    if RegExMatch(txt, 'i)"move"\s*:\s*"([a-z]+)"', &m)
+        for mv in AI_PILOT_MOVES
+            if StrLower(m[1]) = mv
+                out.move := mv
+    if RegExMatch(txt, '"say"\s*:\s*"((?:[^"\\]|\\.)*)"', &m)
+        out.say := Trim(StrReplace(StrReplace(m[1], '\"', '"'), "\n", " "))
+    if RegExMatch(txt, 'i)"where"\s*:\s*"([a-z]+)"', &m)
+        out.where := StrLower(m[1])
+    return out
+}

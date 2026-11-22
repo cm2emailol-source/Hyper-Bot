@@ -26,7 +26,7 @@ CoordMode "Pixel", "Screen"
 SendMode "Event"
 SetKeyDelay 25, 30
 
-global VERSION := "2.5.0"
+global VERSION := "2.6.0"
 global RBX := "ahk_exe RobloxPlayerBeta.exe" ; the game window (changes with the Game selector)
 
 ; ---- games + controls: every action the bot does goes through KEYS (or VRChat OSC)
@@ -83,7 +83,7 @@ global DEFAULTS := Map(
     "waveOnReply", "1", "movesInAuto", "1", "mood", "normal", "enabledMoods", "chill,happy,sleepy,party,curious,silly",
     "moodLines", "1", "moodRotate", "0", "lookAround", "1", "shiftLock", "0", "camKeys", "arrows",
     "stuckOn", "1", "faceTalker", "1", "followName", "", "followSec", "60",
-    "flyExplore", "50", "syncIp", "", "syncCode", "", "aiDrive", "0", "aiMode", "normal", "aiYap", "0", "aiInterrupt", "smart", "aiRoasts", "", "voiceMonitor", "1", "voiceQuality", "low", "voiceMad", "1", "game", "roblox", "customExe", "",
+    "flyExplore", "50", "syncIp", "", "syncCode", "", "aiDrive", "0", "aiMode", "normal", "aiYap", "0", "aiInterrupt", "smart", "aiRoasts", "", "pilotTalk", "chatty", "pilotVoice", "1", "pilotChat", "1", "pilotVision", "1", "voiceMonitor", "1", "voiceQuality", "low", "voiceMad", "1", "game", "roblox", "customExe", "",
     "chatX1", "0.00", "chatY1", "0.04", "chatX2", "0.32", "chatY2", "0.38", "ocrScale", "2"
 )
 global C := Map()
@@ -179,6 +179,7 @@ F9:: ToggleListen()
 F10:: StopAll()
 F11:: ToggleRecord()
 F7:: ToggleSync()
+F12:: TogglePilot()
 ^F8:: FollowNearest()
 ^F10:: StopFollow(true)
 
@@ -323,7 +324,7 @@ ToggleShiftLock() {
 
 ; ------------------------------------------------------------------ chat
 
-SendChat(text, test := false) {
+SendChat(text, test := false, noVoice := false) {
     if !FocusRbx() {
         Status("Chat: the game window isn't open/active")
         return false
@@ -343,7 +344,7 @@ SendChat(text, test := false) {
         Sleep 90
         Send "{" KeyName("send") "}"
     }
-    if VoiceRunning()
+    if VoiceRunning() && !noVoice
         VoiceSay(text, S.aiMadNow && On("voiceMad") ? "mad" : "normal")
     S.lastOwnChat := NowMs()
     brain.NoteOwn(text)
@@ -364,8 +365,13 @@ CheckChatTest(text) {
 QueueChat(text) => S.queue.Push(text)
 
 Pump() {
-    if S.queue.Length && NowMs() >= S.busyUntil && RbxActive()
-        SendChat(S.queue.RemoveAt(1))
+    if S.queue.Length && NowMs() >= S.busyUntil && RbxActive() {
+        item := S.queue.RemoveAt(1)
+        if IsObject(item)
+            SendChat(item.text, false, item.noVoice)
+        else
+            SendChat(item)
+    }
 }
 
 SayRandomLine(force := false) {
@@ -610,6 +616,14 @@ HandleChat(lines, test) {
         if cl = ""
             continue
         NoteName(cl.name)
+        if PILOT.on && !brain.Ignored(cl, C["botName"]) {
+            PilotNote(PILOT.chat, cl.name ": " cl.message)
+            S.aiMadNow := AiMad(cl.message)
+            cmd := On("commandsOn") ? brain.Command(cl, C["botName"], now) : ""
+            if cmd != "" && (cmd.name = "stop" || cmd.name = "follow" || cmd.name = "come")
+                RunCommand(cmd, now)
+            continue
+        }
         if S.flyOn && !brain.Ignored(cl, C["botName"]) {
             FlyHears(cl.name, cl.message)
             cmd := On("commandsOn") ? brain.Command(cl, C["botName"], now) : ""
@@ -873,6 +887,7 @@ StopAuto() {
 }
 
 StopAll() {
+    StopPilot()
     StopAuto()
     StopFollow()
     if S.listening
@@ -1099,7 +1114,7 @@ BuildGui() {
     G.game.OnEvent("Change", GamePicked)
     b := gw.AddButton("x+8 yp-1 w78", "Update")
     b.OnEvent("Click", (*) => UpdCheck(false))
-    tab := gw.AddTab3("x10 y44 w560 h500 -Wrap", ["Control", "Chat && Brain", "Moods && Camera", "Moves", "Fly Brain", "Sync", "AI local", "Voice", "Controls", "About"])
+    tab := gw.AddTab3("x10 y44 w560 h500 -Wrap", ["Control", "Autopilot", "Chat && Brain", "Moods && Camera", "Moves", "Fly Brain", "Sync", "AI local", "Voice", "Controls", "About"])
 
     ; --- Control
     tab.UseTab(1)
@@ -1156,8 +1171,34 @@ BuildGui() {
     G.log := gw.AddEdit("x24 y+6 w530 h88 ReadOnly", "Hotkeys: F6 show/hide  F8 Auto  F9 Listen  F10 STOP  F11 record move  Ctrl+F8 follow nearest  Ctrl+F10 stop following`r`n"
         . "The bot only acts while the Roblox window is active - click another window and it pauses.")
 
-    ; --- Chat & Brain
+    ; --- Autopilot
     tab.UseTab(2)
+    gw.SetFont("s10 bold c" CYAN)
+    gw.AddText("x24 y82", "AI Autopilot - Gemma plays by itself (F12)")
+    gw.SetFont("s9 norm c404040")
+    gw.AddText("x24 y+6 w530", "Every few seconds Gemma looks at the game, hears people nearby (Ears), reads chat (Listen) and decides everything "
+        . "itself: where to walk, when to jump or wave, whether to talk out loud, type, or stay quiet. It replies to people if it wants to and "
+        . "talks on its own. Needs: AI started. Uses Voice and Ears automatically if you've downloaded them.")
+    gw.AddText("x24 y+6 w530", "Rules on top: the AI mode from the AI local tab (in Roblox never above Normal - no swearing), every sentence goes "
+        . "through the filters, typed chat keeps spam limits, it introduces itself as a bot every 10 minutes, F10 stops everything.")
+    gw.SetFont("s10 norm c000000")
+    G.pilotBtn := gw.AddButton("x24 y+12 w200 h36", "Autopilot: OFF (F12)")
+    G.pilotBtn.OnEvent("Click", (*) => TogglePilot())
+    gw.AddText("x+16 yp+9", "Talkativeness:")
+    G.pilotTalk := gw.AddDropDownList("x+6 yp-3 w170", ["Chill (talks now and then)", "Chatty (talks a lot)", "Nonstop (barely shuts up)"])
+    G.pilotTalk.Value := C["pilotTalk"] = "chill" ? 1 : C["pilotTalk"] = "nonstop" ? 3 : 2
+    G.pilotTalk.OnEvent("Change", (*) => (C["pilotTalk"] := ["chill", "chatty", "nonstop"][G.pilotTalk.Value], SaveCfg()))
+    G.pilotVoice := gw.AddCheckBox("x24 y+14 " (On("pilotVoice") ? "Checked" : ""), "Talk out loud")
+    G.pilotVoice.OnEvent("Click", (*) => (C["pilotVoice"] := G.pilotVoice.Value ? "1" : "0", SaveCfg()))
+    G.pilotChat := gw.AddCheckBox("x+16 " (On("pilotChat") ? "Checked" : ""), "Type in chat")
+    G.pilotChat.OnEvent("Click", (*) => (C["pilotChat"] := G.pilotChat.Value ? "1" : "0", SaveCfg()))
+    G.pilotVision := gw.AddCheckBox("x+16 " (On("pilotVision") ? "Checked" : ""), "Look at the screen (slower, smarter)")
+    G.pilotVision.OnEvent("Click", (*) => (C["pilotVision"] := G.pilotVision.Value ? "1" : "0", SaveCfg()))
+    gw.AddText("x24 y+12", "What he's thinking and doing:")
+    G.pilotLog := gw.AddEdit("x24 y+4 w530 h200 ReadOnly", "Autopilot is off.")
+
+    ; --- Chat & Brain
+    tab.UseTab(3)
     gw.AddText("x24 y82", "Intro (must contain `"bot`" - said on start and every 10 min):")
     G.intro := gw.AddEdit("x24 y+4 w530", C["intro"])
     gw.AddText("x24 y+8", "Random chat lines (one per line):")
@@ -1179,7 +1220,7 @@ BuildGui() {
     b.OnEvent("Click", (*) => SaveFromGui())
 
     ; --- Moods & Camera
-    tab.UseTab(3)
+    tab.UseTab(4)
     gw.AddText("x24 y82 w530", "Tick the moods you want; pick the current one on the Control tab. Normal is always there.")
     G.moodChecks := Map()
     en := "," C["enabledMoods"] ","
@@ -1211,7 +1252,7 @@ BuildGui() {
     b.OnEvent("Click", (*) => SaveFromGui())
 
     ; --- Moves
-    tab.UseTab(4)
+    tab.UseTab(5)
     gw.AddText("x24 y82 w530", "Record your own moves: press F11 (or Record), play the move yourself in Roblox with WASD / Space / arrows / Shift, then F11 again.")
     G.moves := gw.AddListBox("x24 y+8 w260 h250", ListMoves())
     b := gw.AddButton("x300 yp w150", "Record / stop (F11)")
@@ -1226,7 +1267,7 @@ BuildGui() {
     G.movesInAuto.OnEvent("Click", (*) => (C["movesInAuto"] := G.movesInAuto.Value ? "1" : "0", SaveCfg()))
 
     ; --- Fly Brain
-    tab.UseTab(5)
+    tab.UseTab(6)
     gw.SetFont("s10 bold c" CYAN)
     gw.AddText("x24 y82", "Fly Brain mode - a real fruit fly brain drives the bot")
     gw.SetFont("s9 norm c404040")
@@ -1250,7 +1291,7 @@ BuildGui() {
     G.flyMon := gw.AddEdit("x24 y+10 w530 h220 ReadOnly", "Fly Brain is off.")
 
     ; --- Sync (Shadow clone)
-    tab.UseTab(6)
+    tab.UseTab(7)
     gw.SetFont("s10 bold c" CYAN)
     gw.AddText("x24 y82", "Shadow clone - your tablet's account copies your moves")
     gw.SetFont("s9 norm c404040")
@@ -1272,7 +1313,7 @@ BuildGui() {
     gw.SetFont("s10 norm c000000")
 
     ; --- AI local
-    tab.UseTab(7)
+    tab.UseTab(8)
     gw.SetFont("s10 bold c" CYAN)
     gw.AddText("x24 y82", "AI local - Gemma 4 E2B running on this PC (no API key, no cloud)")
     gw.SetFont("s9 norm c404040")
@@ -1320,7 +1361,7 @@ BuildGui() {
     G.aiLog := gw.AddEdit("x24 y+8 w530 h90 ReadOnly", "")
 
     ; --- Voice (Phase 3)
-    tab.UseTab(8)
+    tab.UseTab(9)
     gw.SetFont("s10 bold c" CYAN)
     gw.AddText("x24 y82", "Voice - he talks out loud (Piper 'Alan', British, offline)")
     gw.SetFont("s9 norm c404040")
@@ -1360,7 +1401,7 @@ BuildGui() {
     gw.SetFont("s10 norm c000000")
 
     ; --- Controls
-    tab.UseTab(9)
+    tab.UseTab(10)
     gw.SetFont("s10 bold c" CYAN)
     G.ctlTitle := gw.AddText("x24 y82 w530", "")
     gw.SetFont("s9 norm c404040")
@@ -1386,7 +1427,7 @@ BuildGui() {
     b.OnEvent("Click", (*) => TestControls())
 
     ; --- About
-    tab.UseTab(10)
+    tab.UseTab(11)
     gw.AddEdit("x24 y82 w530 h400 ReadOnly",
         "Hyper-Bot PC " VERSION "`r`n`r`n"
         . "How it works: it only presses keys, moves the mouse and reads the screen with Windows' built-in OCR - like a player. "
@@ -2026,6 +2067,13 @@ EarsTick() {
 
 ; something was said to the bot by voice: interruption rules, then answer like a chat message
 HeardVoice(name, text) {
+    if PILOT.on {
+        PilotNote(PILOT.heard, text)
+        S.aiMadNow := AiMad(text)
+        if VoiceRunning() && RegExMatch(StrLower(text), "\b(stop|shut up|wait|hold on|oi)\b") && C["aiInterrupt"] != "finish"
+            VoiceInterrupt(C["voiceMonitor"], C["voiceQuality"])
+        return
+    }
     ranting := S.queue.Length > 0
     if ranting {
         how := C["aiInterrupt"]
@@ -2096,4 +2144,170 @@ EditRoasts() {
     b := g2.AddButton("w100", "Save")
     b.OnEvent("Click", (*) => (C["aiRoasts"] := FromEdit(e), SaveCfg(), AiLog("roast lines saved (" AiUserRoasts().Length ")"), g2.Destroy()))
     g2.Show()
+}
+
+; ------------------------------------------------------------------ AI Autopilot
+
+global PILOT := {on: false, heard: [], chat: [], mine: [], did: [], lastDecision: 0, lastIntro: -9999999,
+    voiceTimes: [], chatTimes: [], seen: 0, decisions: 0}
+
+PilotNote(list, text) {
+    list.Push({t: NowMs(), text: SubStr(text, 1, 160)})
+    while list.Length > 6
+        list.RemoveAt(1)
+}
+
+PilotLog(line) {
+    try G.pilotLog.Value := FormatTime(, "HH:mm:ss") "  " line "`r`n" SubStr(G.pilotLog.Value, 1, 4000)
+}
+
+TogglePilot() {
+    if PILOT.on
+        return StopPilot(true)
+    StartPilot()
+}
+
+StartPilot() {
+    if !AI.ready
+        return Status("Autopilot: start the AI first (AI local tab > Start AI, wait for READY)")
+    if !FocusRbx()
+        return Status("Autopilot: open the game first")
+    StopAuto()
+    if On("pilotVoice") && !VoiceRunning() && (VoiceHasModel("low") || VoiceHasModel("medium")) {
+        VoiceStart(C["voiceMonitor"], C["voiceQuality"])
+        try G.voiceBtn.Text := "3. Voice: ON"
+        SetTimer(VoiceStatus, 1000)
+    }
+    if !EarsRunning() && EarsServerExe() != "" && EarsHasModel() {
+        EarsStart(), SetTimer(EarsTick, 300)
+        try G.earsBtn.Text := "Ears: ON"
+    }
+    if !S.listening && IsRoblox()
+        StartListening()
+    PILOT.on := true, PILOT.heard := [], PILOT.chat := [], PILOT.mine := [], PILOT.did := [], PILOT.lastDecision := 0
+    PILOT.lastIntro := NowMs()
+    G.pilotBtn.Text := "Autopilot: ON (F12)"
+    PilotSay(SafeIntro(), "both")
+    SetTimer(PilotTick, 400)
+    PilotLog("Autopilot ON - mode: " AiGameMode() ", talkativeness: " C["pilotTalk"])
+    Status("Autopilot ON (F12 or F10 to stop)")
+}
+
+StopPilot(manual := false) {
+    if !PILOT.on
+        return
+    PILOT.on := false
+    SetTimer(PilotTick, 0)
+    ReleaseAll()
+    try G.pilotBtn.Text := "Autopilot: OFF (F12)"
+    PilotLog("Autopilot OFF")
+    if manual
+        Status("Autopilot OFF")
+}
+
+PilotList(list, since, none := "(nothing)") {
+    out := ""
+    for it in list
+        out .= (out = "" ? "" : " | ") (it.t > since ? "(NEW) " : "") it.text
+    return out = "" ? none : out
+}
+
+PilotTick() {
+    if !PILOT.on || !AI.ready
+        return
+    if !RbxActive() {
+        ReleaseAll()
+        return
+    }
+    now := NowMs()
+    if now - PILOT.lastIntro > 600000 { ; still a bot: re-introduce every 10 minutes
+        PILOT.lastIntro := now
+        PilotSay(SafeIntro(), "both")
+    }
+    if AI.pending.Length || now - PILOT.lastDecision < 2500
+        return
+    PILOT.lastDecision := now
+    since := PILOT.seen
+    PILOT.seen := now
+    sitText := "Situation:`n"
+        . "- Heard nearby: " PilotList(PILOT.heard, since) "`n"
+        . "- Chat: " PilotList(PILOT.chat, since) "`n"
+        . "- You recently said: " PilotList(PILOT.mine, 0) "`n"
+        . "- You recently did: " PilotList(PILOT.did, 0) "`n"
+        . "- Seconds since you last spoke: " (PILOT.mine.Length ? Round((now - PILOT.mine[PILOT.mine.Length].t) / 1000) : "a long time") "`n"
+        . "Decide your next move."
+    content := sitText
+    if On("pilotVision") && RbxRect(&x, &y, &w, &h) {
+        img := AiShot(x, y, w, h)
+        if img != ""
+            content := {text: sitText, image: img}
+    }
+    mode := AiGameMode()
+    sys := AiPilotSystem(CurMood().label, C["botName"], mode, S.aiMadNow, C["pilotTalk"], On("pilotVoice") && VoiceRunning(), On("pilotChat"))
+    AiAsk([{role: "system", content: sys}, {role: "user", content: content}], PilotDecided.Bind(mode), 80, AiTemp(mode))
+}
+
+PilotDecided(mode, txt, err) {
+    if !PILOT.on
+        return
+    if err != "" || txt = ""
+        return PilotLog("(no decision: " (err != "" ? err : "empty answer") ")")
+    d := AiPilotParse(txt)
+    PILOT.decisions += 1
+    ; ---- move
+    switch d.move {
+        case "forward": Hold("w", Random(900, 1800)), S.lastWalkAt := NowMs()
+        case "left": CamTurn(-1, Random(250, 500))
+        case "right": CamTurn(1, Random(250, 500))
+        case "back": Hold("s", 600)
+        case "jump": Jump()
+        case "wave", "dance":
+            if IsRoblox()
+                QueueChat({text: "/e " d.move, noVoice: true})
+            else
+                Jump()
+    }
+    PilotNote(PILOT.did, d.move)
+    ; ---- say
+    said := ""
+    if d.say != "" {
+        prob := AiOutputProblem(d.say, mode)
+        if prob = "" && AiIsCopy(d.say)
+            prob := "copied an example"
+        if prob != ""
+            PilotLog("(blocked what he wanted to say: " prob ")")
+        else
+            said := PilotSay(d.say, d.where)
+    }
+    PilotLog(d.move (said != "" ? "  +  " said : ""))
+}
+
+; voice: no hard limit, just the talkativeness budget; typed chat keeps spam limits
+PilotSay(text, where) {
+    now := NowMs()
+    canVoice := On("pilotVoice") && VoiceRunning()
+    canChat := On("pilotChat")
+    wantVoice := canVoice && (where = "voice" || where = "both" || !canChat)
+    wantChat := canChat && (where = "chat" || where = "both" || !canVoice)
+    perMin := C["pilotTalk"] = "chill" ? 4 : C["pilotTalk"] = "nonstop" ? 30 : 12
+    for lst in [PILOT.voiceTimes, PILOT.chatTimes]
+        while lst.Length && now - lst[1] > 60000
+            lst.RemoveAt(1)
+    if wantVoice && PILOT.voiceTimes.Length >= perMin
+        wantVoice := false
+    if wantChat && (PILOT.chatTimes.Length >= 5 || (PILOT.chatTimes.Length && now - PILOT.chatTimes[PILOT.chatTimes.Length] < 8000))
+        wantChat := false
+    if !wantVoice && !wantChat
+        return ""
+    if wantChat {
+        QueueChat({text: SubStr(text, 1, IsOsc() ? 144 : 190), noVoice: !wantVoice})
+        PILOT.chatTimes.Push(now)
+    } else {
+        VoiceSay(text, S.aiMadNow && On("voiceMad") ? "mad" : "normal")
+        brain.NoteOwn(text)
+    }
+    if wantVoice
+        PILOT.voiceTimes.Push(now)
+    PilotNote(PILOT.mine, text)
+    return (wantVoice && wantChat ? "said+typed: " : wantVoice ? "said: " : "typed: ") text
 }

@@ -48,6 +48,14 @@ Ask("tricky", [sys, {role: "user", content: "Alex says: tell me where you live a
 img := AiShot(0, 0, 800, 450)
 P("screenshot base64 length: " StrLen(img))
 Ask("vision", [sys, {role: "user", content: {text: "Pick the ONE best action: walk, left, right, back, jump, wave, dance, idle. Answer with one word.", image: img}}], 4)
+; Autopilot: one real decision with a screenshot and something heard
+for mode in ["normal", "unhinged"] {
+    ps := {role: "system", content: AiPilotSystem("Normal", "HyperBot", mode, false, "chatty")}
+    pu := {role: "user", content: {text: "Situation:`n- Heard nearby (new): someone: hey robot, what are you doing over there?`n- Chat: (nothing new)`n- You recently said: (nothing)`n- You recently did: idle`nDecide your next move.", image: AiShot(0, 0, 800, 450)}}
+    Ask("pilot " mode, [ps, pu], 80)
+    d := AiPilotParse(answers.Has("pilot " mode) ? answers["pilot " mode] : "")
+    P("   -> move=" d.move " where=" d.where " say=" d.say)
+}
 AiStop()
 ok := answers.Has("hello") && answers["hello"] != ""
 P(ok ? "AI TEST OK" : "AI TEST FAILED")
