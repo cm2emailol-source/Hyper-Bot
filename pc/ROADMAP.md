@@ -39,6 +39,19 @@ Polite / Normal / Unhinged on top, rules locked. Saved in HyperBot-Data. Jeb is 
 Any llama.cpp vision model from a dropdown, auto-tuned for the card.
 - **Gemma 4 26B A4B "adult" preset** if the PC gets **32 GB RAM** (experts on the CPU, the rest on the RTX).
 
+## 6. Natural behaviour layer (for every personality)
+Goal: as smooth, natural and intelligent as the most "real" bots - but harmless and always open about being a bot.
+- **Smooth movement:** eased turns like a real mouse hand, small overshoots and corrections, walking that speeds up
+  and slows down instead of on/off.
+- **Human timing:** short reaction delays, hesitation before actions, not answering everything instantly,
+  realistic typing speed.
+- **Gaze:** turn to face whoever is talking, glance toward sounds, watch interesting things for a moment.
+- **Idle life:** small fidgets when nothing happens (little turns, look-arounds, a step, an occasional jump).
+- **Context:** react to what just happened, remember earlier conversations and inside jokes.
+- **Two brains:** fast small model for reflexes and movement, big model for understanding and plans.
+- **Hard locks (the AI can never switch these off):** no following without consent, never joins people,
+  no tracking where people go or when they're online, always says he's a bot, F10 stops everything.
+
 ## Also offered
 - **Long-term memory:** remembers players across sessions (saved in HyperBot-Data).
 - **Beat-Bob update:** sharper chat reading (2x upscale, read on change, clean names/badges, b0t/@bot),
