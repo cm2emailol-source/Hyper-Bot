@@ -26,7 +26,7 @@ CoordMode "Pixel", "Screen"
 SendMode "Event"
 SetKeyDelay 25, 30
 
-global VERSION := "2.9.2"
+global VERSION := "2.9.3"
 global RBX := "ahk_exe RobloxPlayerBeta.exe" ; the game window (changes with the Game selector)
 
 ; ---- games + controls: every action the bot does goes through KEYS (or VRChat OSC)
@@ -1111,13 +1111,32 @@ Status(msg) {
     try G.status.Value := FormatTime(, "HH:mm:ss") "  " msg
 }
 
+; Ears in the top bar: off / ON + a live loudness meter (so you can SEE that he's getting sound) / the error
+EarsBar() {
+    if !EarsRunning()
+        return "off"
+    i := EarsInfo()
+    if i.error != ""
+        return "ERROR (" SubStr(i.error, 1, 40) ")"
+    if i.level < 0
+        return "starting"
+    bars := Min(5, Ceil(i.level / 8))
+    return "ON " (bars ? StrRepeat("|", bars) : "silent")
+}
+StrRepeat(t, n) {
+    out := ""
+    loop n
+        out .= t
+    return out
+}
+
 ; one line at the top that always shows what's on, so it's never a mystery why he's talking
 OnBarUpdate() {
     static last := ""
     aiTxt := AI.ready ? "READY (" (AI.gpu ? "GPU " AI.gpuMode : "CPU") ")" : AI.pid ? "loading" : "off"
     yn(v) => v ? "ON" : "off"
     t := "AI " aiTxt "  ·  Mood " CurMood().label "  ·  Listen " yn(S.listening) "  ·  Auto " yn(S.auto) "  ·  Autopilot " yn(PILOT.on)
-        . "  ·  Ears " yn(EarsRunning()) "  ·  Voice " yn(VoiceRunning()) (Trim(C["botName"]) = "" ? "  ·  SET BOT NAME" : "")
+        . "  ·  Ears " EarsBar() "  ·  Voice " yn(VoiceRunning()) (Trim(C["botName"]) = "" ? "  ·  SET BOT NAME" : "")
     if t != last
         try G.onBar.Text := t, last := t
 }
@@ -2094,6 +2113,14 @@ AiYapNow(mode, mad) {
 
 ; ------------------------------------------------------------------ ears: hearing voices (Phase 2)
 
+EarsDeviceNote() {
+    i := EarsInfo()
+    if i.error != ""
+        Status("Ears problem: " i.error)
+    else if i.device != ""
+        Status("Ears are recording from: " i.device " (should be what you hear Roblox on)")
+}
+
 ToggleEars() {
     if EarsRunning() {
         EarsStop(), SetTimer(EarsTick, 0)
@@ -2107,7 +2134,8 @@ ToggleEars() {
     EarsStart()
     SetTimer(EarsTick, 300)
     G.earsBtn.Text := "Ears: ON"
-    Status("Ears on - listening to what plays on this PC (VRChat voices). Tip: mute music/videos.")
+    Status("Ears on - listening to what plays on your default speakers/headphones. Watch 'Ears ON |||' at the top move when someone talks.")
+    SetTimer(EarsDeviceNote, -3000)
 }
 
 EarsTick() {

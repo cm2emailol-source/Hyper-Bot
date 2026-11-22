@@ -31,6 +31,7 @@ EarsStart() {
         return false
     DirCreate(EarsPath("io"))
     try FileDelete(EarsPath("io\heard.txt"))
+    try FileDelete(EarsPath("io\status.txt"))
     FileOpen(EarsPath("io\ctl.txt"), "w", "UTF-8-RAW").Write("pause=0`n")
     threads := Max(2, EnvGet("NUMBER_OF_PROCESSORS") // 3)
     pid := 0
@@ -64,4 +65,21 @@ EarsRead() {
         return ""
     EARS.lastSeq := seq
     return Trim(SubStr(txt, i + 1))
+}
+
+; what the listener reports once a second: the device it records from and the loudness (0-100), or an error
+EarsInfo() {
+    out := {device: "", level: -1, error: ""}
+    try txt := FileRead(EarsPath("io\status.txt"), "UTF-8")
+    catch
+        return out
+    if RegExMatch(txt, "m)^device=(.*)$", &m)
+        out.device := Trim(m[1])
+    if RegExMatch(txt, "m)^level=(\d+)", &m)
+        out.level := Number(m[1])
+    if RegExMatch(txt, "m)^error=(.*)$", &m)
+        out.error := Trim(m[1])
+    if EARS.pyPid && !ProcessExist(EARS.pyPid) && out.error = ""
+        out.error := "the listener stopped"
+    return out
 }

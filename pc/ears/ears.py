@@ -88,11 +88,40 @@ def paused():
         return False, False
 
 
+def write_status(text):
+    try:
+        tmp = os.path.join(IO, "status.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, os.path.join(IO, "status.txt"))
+    except OSError:
+        pass
+
+
+def open_loopback(sc):
+    """The 'recording' side of the speakers Windows plays sound on. Looked up by the device's exact ID:
+    several devices can share a name (e.g. three called 'Speakers' / 'Ηχεία': Realtek, Steam Streaming, ...)
+    and looking it up by name could open a silent one."""
+    spk = sc.default_speaker()
+    try:
+        return spk, sc.get_microphone(id=spk.id, include_loopback=True)
+    except Exception:
+        pass
+    for m in sc.all_microphones(include_loopback=True):
+        if getattr(m, "isloopback", False) and m.id == spk.id:
+            return spk, m
+    return spk, sc.get_microphone(id=str(spk.name), include_loopback=True)
+
+
 def listen():
     import soundcard as sc
-    spk = sc.default_speaker()
-    mic = sc.get_microphone(id=str(spk.name), include_loopback=True)
+    try:
+        spk, mic = open_loopback(sc)
+    except Exception as e:
+        write_status("error=can't open the speakers' sound: %s\n" % e)
+        raise
     noise = 0.005
+    peak, last_status = 0.0, 0.0
     speech, silent, seq = [], 0, 0
     bangs = BangDetector()
     with mic.recorder(samplerate=SR, channels=1, blocksize=1600) as rec:
@@ -105,6 +134,10 @@ def listen():
                 speech, silent = [], 0
                 continue
             rms = float(np.sqrt(np.mean(block ** 2)) + 1e-9)
+            peak = max(peak, rms)
+            if time.time() - last_status > 1.0:                        # live level for the app (once a second)
+                write_status("device=%s\nlevel=%d\n" % (spk.name, min(100, int(peak * 400))))
+                peak, last_status = 0.0, time.time()
             if bangs.update(rms):
                 seq += 1
                 say_heard(seq, "[sound: loud bang]")
@@ -149,4 +182,8 @@ if __name__ == "__main__":
         t0 = time.time()
         print("EARS heard:", transcribe(wav_bytes(raw)), f"({time.time() - t0:.1f} s)")
     else:
-        listen()
+        try:
+            listen()
+        except Exception as e:                                         # show the app why instead of dying silently
+            write_status("error=%s: %s\n" % (type(e).__name__, e))
+            raise
