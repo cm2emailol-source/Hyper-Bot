@@ -144,6 +144,26 @@ def read_ctl():
         return {}
 
 
+def resample(x, sr, dsr):
+    if sr == dsr:
+        return x
+    n = int(len(x) * dsr / sr)
+    return np.interp(np.linspace(0, len(x), n, endpoint=False), np.arange(len(x)), x).astype(np.float32)
+
+
+def log(msg):
+    try:
+        with open(os.path.join(IO, "log.txt"), "a", encoding="utf-8") as f:
+            f.write(time.strftime("%H:%M:%S ") + msg + "\n")
+    except OSError:
+        pass
+
+
+def beep(sr):
+    t = np.arange(int(sr * 0.8)) / sr
+    return (0.3 * np.sin(2 * np.pi * 440 * t) * np.minimum(1, (0.8 - t) * 20)).astype(np.float32)
+
+
 def main():
     os.makedirs(IO, exist_ok=True)
     model = find_model()
@@ -157,10 +177,17 @@ def main():
             x = render(tts, text, style)
             write_wav(os.path.join(out, f"voice_{style}.wav"), x, tts.sr)
             print(f"VOICE {style}: {len(x) / tts.sr:.1f} s of audio made in {time.time() - t0:.2f} s")
+        import sounddevice as sd
+        print(f"VOICE sounddevice/PortAudio OK: {sd.get_portaudio_version()[1]}, {len(sd.query_devices())} device(s) on this machine")
         return
 
+    for f in ("log.txt", "error.txt"):
+        try:
+            os.remove(os.path.join(IO, f))
+        except OSError:
+            pass
     try:
-        import soundcard as sc   # it sets up Windows audio (COM) for this main thread itself
+        import sounddevice as sd
         if model is None:
             raise RuntimeError("no voice model found (en_GB-alan-low.onnx) in HyperBot-Data\\models\\voice")
         tts = Tts(model)
@@ -168,24 +195,58 @@ def main():
         log_error(f"voice engine couldn't start: {e!r}")
         set_state(speaking=0, cable=0, ready=0, error=1)
         raise
-    speakers = sc.all_speakers()
-    cable = next((s for s in speakers if "cable input" in s.name.lower()), None)
+
+    # Windows' standard (MME) audio path: converts formats automatically and works with every device
+    apis = sd.query_hostapis()
+    mme = {i for i, h in enumerate(apis) if h["name"] == "MME"}
+
+    def outputs():
+        return [(i, d) for i, d in enumerate(sd.query_devices())
+                if d["max_output_channels"] > 0 and (not mme or d["hostapi"] in mme)]
+
+    def find_cable():
+        return next((i for i, d in outputs() if "cable input" in d["name"].lower()), None)
+
+    def find_monitor(cable):
+        try:
+            i = sd.default.device[1]
+            if i is None or i < 0:
+                return None
+            name = sd.query_devices(i)["name"].lower()
+            if "cable input" in name:
+                log_error("your Windows default output is CABLE Input - set it to your headphones/speakers to hear him")
+                return None
+            return i
+        except Exception as e:
+            log_error(f"no default speaker: {e!r}")
+            return None
+
+    cable = find_cable()
+    log("output devices: " + " | ".join(f"[{i}] {d['name']}" for i, d in outputs()))
+    log(f"cable: {sd.query_devices(cable)['name'] if cable is not None else 'NOT FOUND'}")
     last_seq, stop_seen = 0, None
-    set_state(speaking=0, cable=1 if cable else 0, ready=1)
+    set_state(speaking=0, cable=1 if cable is not None else 0, ready=1)
     say_path = os.path.join(IO, "say.txt")
     stop_flag = threading.Event()
+    results = {}
 
-    def play(dev, x, sr):
-        com_init()
+    def play(idx, x, sr):
+        name = "?"
         try:
-            with dev.player(samplerate=sr, channels=1, blocksize=1024) as p:
-                step = sr // 10
-                for i in range(0, len(x), step):                   # small blocks so "stop" cuts it off fast
+            d = sd.query_devices(idx)
+            name = d["name"]
+            dsr = int(d["default_samplerate"]) or 48000
+            y = resample(x, sr, dsr)
+            step = dsr // 10
+            with sd.OutputStream(device=idx, samplerate=dsr, channels=1, dtype="float32") as st:
+                for i in range(0, len(y), step):                     # small blocks so "stop" cuts it off fast
                     if stop_flag.is_set():
-                        return
-                    p.play(x[i:i + step])
+                        break
+                    st.write(np.ascontiguousarray(y[i:i + step]).reshape(-1, 1))
+            results[idx] = f"ok on {name} ({dsr} Hz)"
         except Exception as e:
-            log_error(f"playing on '{dev.name}' failed: {e!r}")
+            results[idx] = f"FAILED on {name}: {e!r}"
+            log_error(f"playing on '{name}' failed: {e!r}")
 
     while True:
         ctl = read_ctl()
@@ -210,34 +271,39 @@ def main():
             if c.get("stop") != stop_seen:                          # interrupted: drop what's queued
                 stop_seen = c.get("stop")
                 break
-            x = render(tts, text, style)
-            stop_flag.clear()
-            mon = None
-            if c.get("monitor") == "1":
-                try:
-                    mon = sc.default_speaker()
-                    if cable and mon.name == cable.name:
-                        log_error("your Windows default output is CABLE Input - set it to your headphones to hear him")
-                        mon = None
-                except Exception as e:
-                    log_error(f"no default speaker: {e!r}")
-            devs = [d for d in (cable, mon) if d]
-            if not devs:
+            try:
+                x = beep(tts.sr) if text == "__beep__" else render(tts, text, style)
+            except Exception as e:
+                log_error(f"couldn't make speech: {e!r}")
                 continue
-            set_state(speaking=1, cable=1 if cable else 0, ready=1)
+            stop_flag.clear()
+            if cable is None:
+                cable = find_cable()
+            devs = [d for d in (cable, find_monitor(cable) if c.get("monitor") == "1" else None) if d is not None]
+            devs = list(dict.fromkeys(devs))
+            if not devs:
+                log_error("nowhere to play: no VB-Cable and 'Hear him' is off")
+                continue
+            set_state(speaking=1, cable=1 if cable is not None else 0, ready=1)
             ears_pause(True)
-            th = [threading.Thread(target=play, args=(d, x, tts.sr)) for d in devs]
+            results.clear()
+            th = [threading.Thread(target=play, args=(d, x, tts.sr), daemon=True) for d in devs]
             for t in th:
                 t.start()
-            while any(t.is_alive() for t in th):
+            t_end = time.time() + len(x) / tts.sr + 5                # never hang: give up 5 s after it should have ended
+            while any(t.is_alive() for t in th) and time.time() < t_end:
                 c = read_ctl()
                 if c.get("stop") != stop_seen or c.get("quit") == "1":
                     stop_seen = c.get("stop")
                     stop_flag.set()
                 time.sleep(0.05)
+            if any(t.is_alive() for t in th):
+                stop_flag.set()
+                log_error("playback got stuck and was stopped (" + ", ".join(sd.query_devices(d)["name"] for d in devs) + ")")
+            log(f"said '{text[:40]}' ({len(x) / tts.sr:.1f} s): " + "; ".join(results.values()))
             time.sleep(0.3)                                          # let the echo die before listening again
             ears_pause(False)
-            set_state(speaking=0, cable=1 if cable else 0, ready=1)
+            set_state(speaking=0, cable=1 if cable is not None else 0, ready=1)
         time.sleep(0.05)
 
 

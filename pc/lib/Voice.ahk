@@ -80,3 +80,11 @@ VoiceLastError() {
     }
     return ""
 }
+
+VoiceLastLog() {
+    try {
+        lines := StrSplit(Trim(FileRead(VoicePath("io\log.txt"), "UTF-8"), "`r`n"), "`n", "`r")
+        return lines[lines.Length]
+    }
+    return ""
+}

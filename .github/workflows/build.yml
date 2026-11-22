@@ -129,6 +129,7 @@ jobs:
           Get-ChildItem pc/ears/whisper -Recurse -Filter whisper-server.exe | Select-Object FullName
           python -m pip install --quiet soundcard --target pc/fly/python/Lib/site-packages
           python -m pip install --quiet piper-tts --target pc/fly/python/Lib/site-packages
+          python -m pip install --quiet sounddevice --target pc/fly/python/Lib/site-packages
         env:
           GH_TOKEN: ${{ github.token }}
 

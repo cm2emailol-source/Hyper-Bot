@@ -26,7 +26,7 @@ CoordMode "Pixel", "Screen"
 SendMode "Event"
 SetKeyDelay 25, 30
 
-global VERSION := "2.4.0"
+global VERSION := "2.5.0"
 global RBX := "ahk_exe RobloxPlayerBeta.exe" ; the game window (changes with the Game selector)
 
 ; ---- games + controls: every action the bot does goes through KEYS (or VRChat OSC)
@@ -1349,6 +1349,11 @@ BuildGui() {
     b.OnEvent("Click", (*) => VoiceSay(G.voiceTest.Value, "normal"))
     b := gw.AddButton("x+6 w70", "Say mad")
     b.OnEvent("Click", (*) => VoiceSay(G.voiceTest.Value, "mad"))
+    b := gw.AddButton("x24 y+8 w150", "Test sound (beep)")
+    b.OnEvent("Click", (*) => VoiceSay("__beep__", "normal"))
+    gw.SetFont("s9 c404040")
+    G.voiceLog := gw.AddEdit("x+8 yp w370 h44 ReadOnly -E0x200 BackgroundFFFFFF", "")
+    gw.SetFont("s10 norm c000000")
     gw.SetFont("s8 c808080")
     gw.AddText("x24 y+10 w530", "VRChat setup: Settings > Audio > Microphone = 'CABLE Output (VB-Audio Virtual Cable)'. Keep your real mic for yourself in other apps. "
         . "'Hear him' only copies the sound to your speakers - the bot doesn't know about it.")
@@ -2071,6 +2076,7 @@ VoiceStatus() {
         return SetTimer(VoiceStatus, 0)
     }
     st := VoiceState(), err := VoiceLastError()
+    try G.voiceLog.Value := VoiceLastLog()
     if err != ""
         return G.voiceState.Text := "Voice problem: " err
     G.voiceState.Text := !st.Has("ready") ? "Voice: loading Alan..."
