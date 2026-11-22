@@ -205,6 +205,7 @@ jobs:
           Write-Host $out
           Stop-Process $p
           if ($out -notmatch "(?i)robot") { Write-Host "EARS TEST FAILED"; exit 1 } else { Write-Host "EARS TEST OK" }
+          & pc/fly/python/python.exe pc/ears/ears.py --bangtest 2>&1 | Out-String | Write-Host
           & pc/fly/python/python.exe -c "import soundcard; print('EARS soundcard import OK')"
 
       - name: Voice test - Piper Alan speaks, Whisper must understand him (normal + mad voice)

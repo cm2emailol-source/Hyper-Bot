@@ -26,7 +26,7 @@ CoordMode "Pixel", "Screen"
 SendMode "Event"
 SetKeyDelay 25, 30
 
-global VERSION := "2.7.0"
+global VERSION := "2.7.1"
 global RBX := "ahk_exe RobloxPlayerBeta.exe" ; the game window (changes with the Game selector)
 
 ; ---- games + controls: every action the bot does goes through KEYS (or VRChat OSC)
@@ -2069,6 +2069,12 @@ EarsTick() {
 
 ; something was said to the bot by voice: interruption rules, then answer like a chat message
 HeardVoice(name, text) {
+    if SubStr(text, 1, 7) = "[sound:" && RegExReplace(text, "\[sound:[^\]]*\]") = "" && !PILOT.on {
+        ; only a sound (no words): outside Autopilot nobody needs a reply - just a little startle hop in Auto
+        if S.auto && RbxActive()
+            Jump()
+        return AiLog("heard a sound: " text)
+    }
     if PILOT.on {
         PilotNote(PILOT.heard, text)
         S.aiMadNow := AiMad(text)

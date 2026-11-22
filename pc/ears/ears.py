@@ -22,6 +22,25 @@ IO = os.path.join(HERE, "io")
 URL = "http://127.0.0.1:8098/inference"
 SR = 16000
 JUNK = re.compile(r"^\s*[\[\(].*[\]\)]\s*$|^\s*(thank you\.?|thanks for watching!?|you|bye\.?|\.+)\s*$", re.I)
+# Whisper sometimes labels non-speech like "[gunshot]" or "(explosion)": keep the interesting ones as sounds
+SOUNDS = re.compile(r"gun|shot|bang|explo|boom|blast|scream|yell|shout|laugh|crash|siren|alarm|thud|knock|glass|growl|roar|whistle|clap|applause", re.I)
+
+
+class BangDetector:
+    """A sudden, very loud block after quieter ones = a bang (gunshot, explosion, door slam...)."""
+
+    def __init__(self):
+        self.avg = 0.01
+        self.cool = 0
+
+    def update(self, rms):
+        bang = self.cool == 0 and rms > 0.2 and rms > self.avg * 8
+        self.avg = 0.9 * self.avg + 0.1 * rms
+        if bang:
+            self.cool = 20                                            # at most one bang every 2 s
+        elif self.cool:
+            self.cool -= 1
+        return bang
 
 
 def wav_bytes(samples):
@@ -45,7 +64,12 @@ def transcribe(wav):
     with urllib.request.urlopen(req, timeout=60) as r:
         text = json.loads(r.read().decode("utf-8", "ignore")).get("text", "")
     text = re.sub(r"\s+", " ", text).strip()
-    return "" if JUNK.match(text) else text
+    tags = re.findall(r"[\[\(]([^\]\)]{1,30})[\]\)]", text)
+    sounds = [t.strip().lower() for t in tags if SOUNDS.search(t)]
+    speech = re.sub(r"[\[\(][^\]\)]*[\]\)]", " ", text).strip()
+    speech = "" if JUNK.match(speech) or not re.search(r"[a-zA-Z]{2}", speech) else re.sub(r"\s+", " ", speech)
+    out = " ".join(f"[sound: {x}]" for x in sounds[:2])
+    return (out + " " + speech).strip() if speech or out else ""
 
 
 def say_heard(seq, text):
@@ -70,6 +94,7 @@ def listen():
     mic = sc.get_microphone(id=str(spk.name), include_loopback=True)
     noise = 0.005
     speech, silent, seq = [], 0, 0
+    bangs = BangDetector()
     with mic.recorder(samplerate=SR, channels=1, blocksize=1600) as rec:
         while True:
             quit_, pause = paused()
@@ -80,6 +105,9 @@ def listen():
                 speech, silent = [], 0
                 continue
             rms = float(np.sqrt(np.mean(block ** 2)) + 1e-9)
+            if bangs.update(rms):
+                seq += 1
+                say_heard(seq, "[sound: loud bang]")
             voiced = rms > max(0.01, noise * 3)
             if not voiced and not speech:
                 noise = 0.95 * noise + 0.05 * rms                      # learn the background level
@@ -102,6 +130,12 @@ def listen():
 
 if __name__ == "__main__":
     os.makedirs(IO, exist_ok=True)
+    if "--bangtest" in sys.argv:
+        d = BangDetector()
+        quiet = [0.01] * 30
+        hits = [d.update(x) for x in quiet + [0.6] + quiet + [0.05] * 20 + [0.7, 0.7]]
+        print("EARS bang detector:", sum(hits), "bang(s) found (expected 2)")
+        sys.exit(0)
     if "--file" in sys.argv:
         path = sys.argv[sys.argv.index("--file") + 1]
         with wave.open(path, "rb") as w:
