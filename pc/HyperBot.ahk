@@ -2271,7 +2271,7 @@ PilotDecided(mode, txt, err) {
     ; ---- say
     said := ""
     if d.say != "" {
-        prob := AiOutputProblem(d.say, mode)
+        prob := AiOutputProblem(d.say, mode, 240) ; autopilot may say one or two sentences
         if prob = "" && AiIsCopy(d.say)
             prob := "copied an example"
         if prob != ""

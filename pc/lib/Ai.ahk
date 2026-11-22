@@ -83,10 +83,10 @@ AiHas(text, list) {
 AiInputBlocked(msg, mode := "normal") => AiHas(msg, mode = "unhinged" ? AI_HARD : AI_BAD) != "" || AiHas(msg, AI_DATING) != "" || AiHas(msg, AI_PERSONAL) != ""
 
 ; outgoing: every AI reply is checked; anything flagged is thrown away
-AiOutputProblem(txt, mode := "normal") {
+AiOutputProblem(txt, mode := "normal", maxLen := 0) {
     if txt = ""
         return "empty"
-    if StrLen(txt) > (mode = "unhinged" ? 430 : 120)
+    if StrLen(txt) > (maxLen ? maxLen : mode = "unhinged" ? 430 : 120)
         return "too long"
     if w := AiHas(txt, AI_HARD)
         return "hard-blocked word"
