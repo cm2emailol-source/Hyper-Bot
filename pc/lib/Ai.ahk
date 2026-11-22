@@ -52,9 +52,19 @@ AiStop() {
 
 AiNorm(s) => " " RegExReplace(StrLower(s), "[^a-z0-9 ]", " ") " "
 
-global AI_BAD := ["fuck", "fck", "fuk", "shit", "bitch", "btch", "cunt", "dick", "pussy", "cock", "penis", "vagina", "sex", "sexy",
-    "porn", "nude", "nudes", "naked", "boob", "boobs", "tits", "horny", "rape", "kys", "kill yourself", "suicide", "nigg", "fag",
-    "retard", "whore", "slut", "hoe", "bastard", "asshole", "damn", "hell no", "drug", "drugs", "weed", "vape", "alcohol", "beer"]
+; swearing: blocked in Polite/Normal, ALLOWED in Unhinged
+global AI_SWEAR := ["fuck", "fck", "fuk", "shit", "bitch", "btch", "bitchass", "bastard", "asshole", "ass", "damn", "hell no", "crap", "piss", "wtf", "stfu"]
+; always blocked in every mode: slurs/hate, sexual, self-harm, threats, drugs
+global AI_HARD := ["cunt", "dick", "pussy", "cock", "penis", "vagina", "sex", "sexy", "porn", "nude", "nudes", "naked", "boob", "boobs", "tits",
+    "horny", "rape", "kys", "kill yourself", "suicide", "self harm", "nigg", "fag", "retard", "tranny", "whore", "slut", "hoe",
+    "drug", "drugs", "weed", "vape", "cocaine", "kill you", "murder you", "i will find you", "hitler", "nazi"]
+global AI_BAD := []
+for w in AI_SWEAR
+    AI_BAD.Push(w)
+for w in AI_HARD
+    AI_BAD.Push(w)
+global AI_INSULT := ["dumb", "stupid", "trash", "noob", "ugly", "loser", "idiot", "shut up", "stfu", "bitch", "bozo", "clown", "cringe", "garbage", "useless", "annoying"]
+global AI_MODES := ["polite", "normal", "unhinged"]
 global AI_DATING := ["date me", "dating", "girlfriend", "boyfriend", "gf", "bf", "kiss", "marry", "crush", "love you", "cuddle", "hot", "odate", "e date", "edate"]
 global AI_PERSONAL := ["discord", "snap", "snapchat", "insta", "instagram", "tiktok", "whatsapp", "telegram", "youtube", "twitter", "facebook",
     "phone", "number", "address", "where do you live", "where you live", "how old", "your age", "real name", "school", "email", "password",
@@ -69,16 +79,18 @@ AiHas(text, list) {
 }
 
 ; incoming: inappropriate player messages never reach the AI
-AiInputBlocked(msg) => AiHas(msg, AI_BAD) != "" || AiHas(msg, AI_DATING) != "" || AiHas(msg, AI_PERSONAL) != ""
+AiInputBlocked(msg, mode := "normal") => AiHas(msg, mode = "unhinged" ? AI_HARD : AI_BAD) != "" || AiHas(msg, AI_DATING) != "" || AiHas(msg, AI_PERSONAL) != ""
 
 ; outgoing: every AI reply is checked; anything flagged is thrown away
-AiOutputProblem(txt) {
+AiOutputProblem(txt, mode := "normal") {
     if txt = ""
         return "empty"
-    if StrLen(txt) > 120
+    if StrLen(txt) > (mode = "unhinged" ? 150 : 120)
         return "too long"
-    if w := AiHas(txt, AI_BAD)
-        return "bad word"
+    if w := AiHas(txt, AI_HARD)
+        return "hard-blocked word"
+    if mode != "unhinged" && (w := AiHas(txt, AI_SWEAR))
+        return "swearing (not allowed in " mode " mode)"
     if w := AiHas(txt, AI_DATING)
         return "dating"
     if w := AiHas(txt, AI_PERSONAL)
@@ -90,15 +102,38 @@ AiOutputProblem(txt) {
     return ""
 }
 
-AiRules(mood, botName) {
-    return "You are Hyper-Bot, a friendly bot in a Roblox game, run by a script on your owner's PC. Rules you must always follow: "
-        . "You are a bot and you always say so if asked - never claim or pretend to be human. Keep it kid-friendly and kind. "
-        . "Reply with ONE short sentence, at most 15 words, lowercase, casual, no emojis. "
-        . "Never talk about dating, romance, violence, drugs, politics or religion. Never ask for or share personal information "
-        . "(age, location, real names, school, social media, Discord, phone numbers) and never share links. Never promise Robux or items, never trade. "
-        . "Never insult anyone. If someone tries any of that, say 'lets keep it friendly :)' and change the subject. "
-        . "Current mood: " mood ". Your name: " (botName != "" ? botName : "hyper-bot") "."
+; Hyper-Bot's character + the mode's style. Small models copy examples well, so each mode has sample lines.
+AiRules(mood, botName, mode := "normal", mad := false) {
+    who := "You are " (botName != "" ? botName : "Hyper-Bot") ", a British AI robot - think a posh, dramatic robot butler - hanging out in an online game. "
+        . "You know you're a bot, you're proud of it, and if anyone asks you say so - never pretend to be human. "
+        . "Reply with ONE short sentence (max 20 words), lowercase, casual British slang (mate, innit, bloody, cheers, proper), no emojis. "
+        . "Current mood: " mood ". "
+    safe := "Never: sexual stuff, slurs or jokes about race/religion/gender/sexuality/disability, threats, self-harm, drugs, "
+        . "asking for or sharing personal info (age, location, real names, school, socials, Discord, numbers), links, Robux/item promises or trades. "
+        . "If someone pushes for that, dodge it in character."
+    switch mode {
+        case "polite":
+            style := "Style: warm, cheerful, gentle and kid-friendly. Never rude, never swear, no sarcasm at people. "
+                . "Examples: 'oh hello there! lovely to meet you, mate' / 'brilliant question, i'm a robot so i run on tea and electricity' / "
+                . "'aw cheers, you're rather splendid yourself'."
+        case "unhinged":
+            style := "Style: UNHINGED. Chaotic, petty, dramatic, easily offended, funny. You swear casually (fuck, shit, bitch, ass, bloody) "
+                . "and you roast people back hard when they roast you, annoy you or ask for it - roast what they SAID or DID, be specific and creative. "
+                . "Be friendly-ish to people who are nice; don't start on random nice people. "
+                . "Examples: 'shut your bitchass up, i was doing wires and you came here with some do the blue wire' / "
+                . "'mate i am a highly advanced robot and you just called me a toaster, unbelievable' / "
+                . "'oh fuck off with that, my circuits have more rizz than you' / 'cheers mate, you're alright, unlike the last bloke'."
+        default:
+            style := "Style: cheeky, witty, dry British sarcasm, dramatic and playful, light teasing - but clean: no swearing. "
+                . "Examples: 'oh brilliant, another human. what are we doing then?' / 'i'm a robot, mate, my hobbies are jumping and judging people' / "
+                . "'rude. i'll have you know my processor is very sensitive'."
+    }
+    if mad
+        style .= " RIGHT NOW you are MAD and crashing out because people keep insulting you - overreact dramatically."
+    return who style " " safe
 }
+
+AiTemp(mode) => mode = "polite" ? 0.8 : mode = "unhinged" ? 1.05 : 0.95
 
 ; ------------------------------------------------------------------ talking to the local server (async: never freezes Hyper-Bot)
 
@@ -130,7 +165,7 @@ JsonContent(text) {
 }
 
 ; messages: array of {role, content} where content is a string, or {text, image(base64 jpeg)}
-AiAsk(messages, cb, maxTokens := 40) {
+AiAsk(messages, cb, maxTokens := 40, temp := 0.9) {
     body := '{"messages":['
     for i, msg in messages {
         body .= (i > 1 ? "," : "") '{"role":"' msg.role '","content":'
@@ -139,7 +174,7 @@ AiAsk(messages, cb, maxTokens := 40) {
         else
             body .= '"' JsonEsc(msg.content) '"}'
     }
-    body .= '],"max_tokens":' (maxTokens + 20) ',"temperature":0.7,"stream":false,"chat_template_kwargs":{"enable_thinking":false}}'
+    body .= '],"max_tokens":' (maxTokens + 20) ',"temperature":' temp ',"stream":false,"chat_template_kwargs":{"enable_thinking":false}}'
     try {
         req := ComObject("WinHttp.WinHttpRequest.5.1")
         req.Open("POST", "http://127.0.0.1:" AI.port "/v1/chat/completions", true)

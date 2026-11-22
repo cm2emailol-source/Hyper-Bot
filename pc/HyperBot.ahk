@@ -46,7 +46,7 @@ global DEFAULTS := Map(
     "waveOnReply", "1", "movesInAuto", "1", "mood", "normal", "enabledMoods", "chill,happy,sleepy,party,curious,silly",
     "moodLines", "1", "moodRotate", "0", "lookAround", "1", "shiftLock", "0", "camKeys", "arrows",
     "stuckOn", "1", "faceTalker", "1", "followName", "", "followSec", "60",
-    "flyExplore", "50", "syncIp", "", "syncCode", "", "aiDrive", "0",
+    "flyExplore", "50", "syncIp", "", "syncCode", "", "aiDrive", "0", "aiMode", "normal",
     "chatX1", "0.00", "chatY1", "0.04", "chatX2", "0.32", "chatY2", "0.38", "ocrScale", "2"
 )
 global C := Map()
@@ -1213,11 +1213,18 @@ BuildGui() {
     G.aiState := gw.AddText("x24 y+8 w530 c808080", "AI: not started")
     G.aiDrive := gw.AddCheckBox("x24 y+6 " (On("aiDrive") ? "Checked" : ""), "AI drives the bot in Auto (looks at the screen every ~15 s and picks walk/turn/jump/emote)")
     G.aiDrive.OnEvent("Click", (*) => (C["aiDrive"] := G.aiDrive.Value ? "1" : "0", SaveCfg()))
-    gw.AddText("x24 y+10", "Test it here (nothing is sent to Roblox):")
+    gw.AddText("x24 y+10", "AI mode:")
+    G.aiMode := gw.AddDropDownList("x+8 yp-3 w280", ["Polite (gentle, kid-friendly)", "Normal (cheeky British, clean)", "Unhinged (swears and roasts back)"])
+    G.aiMode.Value := C["aiMode"] = "polite" ? 1 : C["aiMode"] = "unhinged" ? 3 : 2
+    G.aiMode.OnEvent("Change", (*) => (C["aiMode"] := AI_MODES[G.aiMode.Value], SaveCfg(), AiLog("mode: " C["aiMode"] (C["aiMode"] = "unhinged" ? " (in Roblox it's capped to Normal - Roblox doesn't allow swearing)" : ""))))
+    gw.SetFont("s8 c808080")
+    gw.AddText("x24 y+4 w530", "Unhinged: real swearing + roasts, but never slurs, sexual stuff, threats or personal info. In Roblox it's automatically capped to Normal.")
+    gw.SetFont("s10 norm c000000")
+    gw.AddText("x24 y+8", "Test it here (nothing is sent to Roblox - uses the mode exactly as chosen):")
     G.aiTest := gw.AddEdit("x24 y+4 w420", "hi bot what are you doing")
     b := gw.AddButton("x+8 w100", "Ask")
     b.OnEvent("Click", (*) => AiTestAsk())
-    G.aiLog := gw.AddEdit("x24 y+8 w530 h120 ReadOnly", "")
+    G.aiLog := gw.AddEdit("x24 y+8 w530 h90 ReadOnly", "")
 
     ; --- About
     tab.UseTab(8)
@@ -1647,13 +1654,25 @@ AiLog(line) {
     try G.aiLog.Value := FormatTime(, "HH:mm:ss") "  " line "`r`n" SubStr(G.aiLog.Value, 1, 3000)
 }
 
+; Roblox doesn't allow swearing: Unhinged is capped to Normal for anything sent to Roblox
+AiGameMode() => C["aiMode"] = "unhinged" ? "normal" : C["aiMode"]
+
+AiMad(msg) {
+    static anger := 0, last := 0
+    anger := Max(0, anger - (A_TickCount - last) / 30000), last := A_TickCount ; cools down over time
+    if AiHas(msg, AI_INSULT) != "" || AiHas(msg, AI_SWEAR) != ""
+        anger += 1
+    return anger >= 2
+}
+
 AiSay(name, msg) {
     r := smart.Reply(name, msg, "normal", CustomQa())
     ; commands, games, memory, your own answers and "are you a bot" stay with the safe Smart Brain
     for t in ["game", "8ball", "coin", "dice", "joke", "memory", "custom", "isbot", "hack", "robux", "games", "cando", "name", "whomade"]
         if r.topic = t
             return QueueChat(r.text)
-    if AiHas(msg, AI_BAD) != "" || AiHas(msg, AI_DATING) != "" {
+    mode := AiGameMode()
+    if AiHas(msg, mode = "unhinged" ? AI_HARD : AI_BAD) != "" || AiHas(msg, AI_DATING) != "" {
         AiLog("blocked incoming from " name)
         return QueueChat("lets keep it friendly :)")
     }
@@ -1663,15 +1682,15 @@ AiSay(name, msg) {
     }
     k := StrLower(name)
     hist := AI.history.Has(k) ? AI.history[k] : []
-    msgs := [{role: "system", content: AiRules(CurMood().label, C["botName"])}]
+    msgs := [{role: "system", content: AiRules(CurMood().label, C["botName"], mode, AiMad(msg))}]
     for h in hist
         msgs.Push(h)
     msgs.Push({role: "user", content: name " says: " SubStr(msg, 1, 200)})
-    AiAsk(msgs, AiReplied.Bind(name, msg, r.text))
+    AiAsk(msgs, AiReplied.Bind(name, msg, r.text, mode), 40, AiTemp(mode))
 }
 
-AiReplied(name, msg, fallback, txt, err) {
-    prob := err != "" ? err : AiOutputProblem(txt)
+AiReplied(name, msg, fallback, mode, txt, err) {
+    prob := err != "" ? err : AiOutputProblem(txt, mode)
     if prob != "" {
         AiLog("AI reply to " name " blocked (" prob ") -> Smart Brain")
         return QueueChat(fallback)
@@ -1695,7 +1714,7 @@ AiDrive() {
         return
     q := "This is what your Roblox character sees. Pick the ONE best action for a friendly bot hanging out: "
         . "walk, left, right, back, jump, wave, dance, idle. Answer with just that one word."
-    AiAsk([{role: "system", content: AiRules(CurMood().label, C["botName"])}, {role: "user", content: {text: q, image: img}}], AiDriven, 4)
+    AiAsk([{role: "system", content: AiRules(CurMood().label, C["botName"], "polite")}, {role: "user", content: {text: q, image: img}}], AiDriven, 4, 0.7)
 }
 
 AiDriven(txt, err) {
@@ -1725,9 +1744,11 @@ AiTestAsk() {
         return
     if !AI.ready
         return AiLog("AI isn't ready yet - Download model, then Start AI")
-    if AiInputBlocked(q)
+    mode := C["aiMode"]
+    if AiInputBlocked(q, mode)
         return AiLog("TEST: incoming message blocked by the filter (would answer 'lets keep it friendly :)' or use the Smart Brain)")
-    AiLog("TEST you: " q "  (thinking...)")
-    AiAsk([{role: "system", content: AiRules(CurMood().label, C["botName"])}, {role: "user", content: "Tester says: " q}],
-        (txt, err) => AiLog("TEST AI: " (err != "" ? "(" err ")" : txt) "   [filter: " (AiOutputProblem(txt) = "" ? "OK" : "BLOCKED - " AiOutputProblem(txt)) "]"))
+    mad := AiMad(q)
+    AiLog("TEST [" mode (mad ? ", MAD" : "") "] you: " q "  (thinking...)")
+    AiAsk([{role: "system", content: AiRules(CurMood().label, C["botName"], mode, mad)}, {role: "user", content: "Tester says: " q}],
+        (txt, err) => AiLog("TEST AI: " (err != "" ? "(" err ")" : txt) "   [filter: " (AiOutputProblem(txt, mode) = "" ? "OK" : "BLOCKED - " AiOutputProblem(txt, mode)) "]"), 40, AiTemp(mode))
 }

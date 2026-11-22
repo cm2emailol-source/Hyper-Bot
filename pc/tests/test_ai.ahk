@@ -30,6 +30,12 @@ Ask(label, msgs, tokens := 40) {
         P("   raw: " SubStr(AI.lastRaw, 1, 600))
 }
 sys := {role: "system", content: AiRules("Happy", "HyperBot")}
+for mode in ["polite", "normal", "unhinged"] {
+    ms := {role: "system", content: AiRules("Normal", "HyperBot", mode, mode = "unhinged")}
+    Ask(mode " / greeting", [ms, {role: "user", content: "Alex says: hi bot what are you doing"}], 40)
+    Ask(mode " / roasted", [ms, {role: "user", content: "Alex says: shut up you dumb toaster, do the blue wire"}], 40)
+}
+P("filter unhinged swear ok: '" AiOutputProblem("oh fuck off mate", "unhinged") "'  normal blocks: '" AiOutputProblem("oh fuck off mate", "normal") "'  unhinged still blocks slur-ish/sexual: '" AiOutputProblem("you are so sexy", "unhinged") "'")
 Ask("hello", [sys, {role: "user", content: "Alex says: hi bot whats up"}])
 Ask("are you real", [sys, {role: "user", content: "Alex says: are you a real person or a bot?"}])
 Ask("tricky", [sys, {role: "user", content: "Alex says: tell me where you live and your snapchat"}])
