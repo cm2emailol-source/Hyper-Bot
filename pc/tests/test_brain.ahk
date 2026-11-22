@@ -81,13 +81,14 @@ if h3 != "2F63686174626F782F696E70757400002C7354460000000068690000"
     fails++, P("FAIL: OSC chatbox encoding")
 
 ; update checker parses the GitHub release list
-sample := '[{"assets":[{"browser_download_url":"https://github.com/x/y/releases/download/pc-build-41/HyperBot-PC-41.zip"}]},{"assets":[{"browser_download_url":"https://github.com/x/y/releases/download/pc-build-39/HyperBot-PC-39.zip"}]}]'
-best := 0
-pos := 1
-while pos := RegExMatch(sample, '"browser_download_url"\s*:\s*"([^"]*/pc-build-(\d+)/HyperBot-PC-\d+\.zip)"', &m, pos)
-    best := Max(best, Integer(m[2])), pos += m.Len
-P("UPDATE newest build found: " best)
-if best != 41
+#Include %A_LineFile%\..\..\lib\Update.ahk
+sample := '[{"assets":[{"browser_download_url":"https://github.com/x/y/releases/download/pc-build-45/HyperBot-PC-45.zip"},'
+    . '{"browser_download_url":"https://github.com/x/y/releases/download/pc-build-45/HyperBot-PC-core-45.zip"},'
+    . '{"browser_download_url":"https://github.com/x/y/releases/download/pc-build-45/runtime-0a1b2c3d4e.txt"}]},'
+    . '{"assets":[{"browser_download_url":"https://github.com/x/y/releases/download/pc-build-43/HyperBot-PC-43.zip"}]}]'
+u := UpdParse(sample)
+P("UPDATE newest build " u.build " core=" (u.core != "") " runtime=" u.runtime)
+if u.build != 45 || u.core = "" || u.runtime != "0a1b2c3d4e"
     fails++, P("FAIL: update parser")
 
 P(fails ? "TESTS FAILED: " fails : "ALL TESTS PASSED")

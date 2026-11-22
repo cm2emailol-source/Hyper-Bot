@@ -10,7 +10,36 @@ UpdMyBuild() {
     return 0
 }
 
-; {build, url, size} of the newest PC build, or "" (shows why in Status)
+UpdMyRuntime() {
+    for f in [A_ScriptDir "\runtime.txt", A_LineFile "\..\..\runtime.txt"]
+        try return Trim(FileRead(f), " `r`n")
+    return ""
+}
+
+; parse the GitHub release list -> newest PC build: {build, full, core, runtime}
+UpdParse(txt) {
+    rel := Map()
+    pos := 1
+    while pos := RegExMatch(txt, '"browser_download_url"\s*:\s*"([^"]*/pc-build-(\d+)/([^"/]+))"', &m, pos) {
+        pos += m.Len
+        n := Integer(m[2]), f := m[3]
+        if !rel.Has(n)
+            rel[n] := {build: n, full: "", core: "", runtime: ""}
+        if RegExMatch(f, "^HyperBot-PC-\d+\.zip$")
+            rel[n].full := m[1]
+        else if RegExMatch(f, "^HyperBot-PC-core-\d+\.zip$")
+            rel[n].core := m[1]
+        else if RegExMatch(f, "^runtime-([0-9a-f]+)\.txt$", &h)
+            rel[n].runtime := h[1]
+    }
+    best := ""
+    for n, r in rel
+        if r.full != "" && (best = "" || n > best.build)
+            best := r
+    return best
+}
+
+; newest PC build, or a reason string
 UpdLatest() {
     try {
         h := ComObject("WinHttp.WinHttpRequest.5.1")
@@ -19,12 +48,7 @@ UpdLatest() {
         h.Send()
         if h.Status != 200
             return h.Status = 404 ? "private" : "http " h.Status
-        best := "", txt := h.ResponseText, pos := 1
-        while pos := RegExMatch(txt, '"browser_download_url"\s*:\s*"([^"]*/pc-build-(\d+)/HyperBot-PC-\d+\.zip)"', &m, pos) {
-            if best = "" || Integer(m[2]) > best.build
-                best := {build: Integer(m[2]), url: m[1]}
-            pos += m.Len
-        }
+        best := UpdParse(h.ResponseText)
         return best = "" ? "none" : best
     } catch as e
         return "error " e.Message
@@ -44,7 +68,11 @@ UpdCheck(silent := false) {
             Status("Hyper-Bot is up to date (build " mine ")")
         return
     }
-    if MsgBox("A new Hyper-Bot is available: build " r.build " (you have build " mine ").`n`nDownload and install it now? "
+    small := r.core != "" && r.runtime != "" && r.runtime = UpdMyRuntime()
+    r.url := small ? r.core : r.full
+    if MsgBox("A new Hyper-Bot is available: build " r.build " (you have build " mine ").`n`n"
+        . (small ? "It's a small update (about 1 MB). " : "This update includes new engines (about 125 MB). ")
+        . "Download and install it now? "
         . "Hyper-Bot will close and restart by itself. Your models, settings, moves and fly memory stay safe in HyperBot-Data.",
         "Hyper-Bot update", "YesNo Iconi 262144") = "Yes"
         UpdInstall(r)
@@ -53,9 +81,10 @@ UpdCheck(silent := false) {
 UpdInstall(r) {
     tmp := A_Temp "\HyperBot-update"
     try DirDelete(tmp, true)
+    try FileDelete(A_Temp "\HyperBot-update.bat")
     DirCreate(tmp)
     app := RegExReplace(A_LineFile, "\\lib\\[^\\]+$")
-    bat := tmp "\update.bat"
+    bat := A_Temp "\HyperBot-update.bat"
     q1 := Chr(39), q2 := Chr(34) ; ' and " for the PowerShell command
     ; the batch waits for Hyper-Bot to close, downloads, unpacks, copies program files over, and restarts it
     FileAppend(
@@ -69,7 +98,8 @@ UpdInstall(r) {
         . 'robocopy "' tmp '\new\HyperBot-PC" "' app '" /E /R:3 /W:1 /NFL /NDL /NJH /NJS /XD io >nul' "`r`n"
         . 'if %ERRORLEVEL% GEQ 8 (echo COPY FAILED - close anything using the Hyper-Bot folder and try again & pause & exit /b 1)' "`r`n"
         . 'start "" "' app '\Start Hyper-Bot.bat"' "`r`n"
-        . "exit /b 0`r`n", bat, "UTF-8-RAW")
+        . 'rd /s /q "' tmp '"' "`r`n"
+        . '(goto) 2>nul & del "%~f0"' "`r`n", bat, "UTF-8-RAW")
     try FlyStop()
     try AiStop()
     try EarsStop()

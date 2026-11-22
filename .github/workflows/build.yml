@@ -143,13 +143,32 @@ jobs:
           Copy-Item ahk/AutoHotkey64.exe $d
           $lic = Get-ChildItem ahk -Recurse -Filter "license*" | Select-Object -First 1
           if ($lic) { Copy-Item $lic.FullName "$d/AutoHotkey_license.txt" }
+          # runtime = the big parts that rarely change; its fingerprint decides whether an update needs them
+          $heavy = @("fly/python", "fly/fly_data.npz", "ai/llama", "ears/whisper", "AutoHotkey64.exe")
+          $root = (Resolve-Path $d).Path
+          $files = foreach ($h in $heavy) { Get-ChildItem "$d/$h" -Recurse -File | Where-Object { $_.FullName -notmatch "__pycache__" } }
+          $sig = ($files | Sort-Object FullName | ForEach-Object { $_.FullName.Substring($root.Length) + ":" + $_.Length }) -join "`n"
+          $sha = [System.Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($sig))
+          $hash = (($sha | ForEach-Object { $_.ToString("x2") }) -join "").Substring(0, 10)
+          Set-Content "$d/runtime.txt" $hash
+          Write-Host "runtime fingerprint: $hash"
           Compress-Archive -Path $d -DestinationPath "HyperBot-PC-${{ github.run_number }}.zip"
+          # small core package: everything except the runtime
+          $c = "core/HyperBot-PC"
+          New-Item -ItemType Directory $c -Force | Out-Null
+          Copy-Item "$d/*" $c -Recurse
+          foreach ($h in $heavy) { Remove-Item "$c/$h" -Recurse -Force -ErrorAction SilentlyContinue }
+          Compress-Archive -Path $c -DestinationPath "HyperBot-PC-core-${{ github.run_number }}.zip"
+          Set-Content "runtime-$hash.txt" $hash
+          Get-ChildItem HyperBot-PC-*.zip, runtime-*.txt | Select-Object Name, Length
 
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: pc-build-${{ github.run_number }}
           name: Hyper-Bot PC build ${{ github.run_number }}
-          files: HyperBot-PC-*.zip
+          files: |
+            HyperBot-PC-*.zip
+            runtime-*.txt
 
       - name: AI local test with the real model (Gemma 4 E2B, not packaged - users download it once)
         shell: cmd
