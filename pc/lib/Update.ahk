@@ -5,7 +5,8 @@
 global UPD := {repo: "cm2emailol-source/Hyper-Bot"}
 
 UpdMyBuild() {
-    try return Integer(Trim(FileRead(A_LineFile "\..\..\build.txt")))
+    for f in [A_ScriptDir "\build.txt", A_LineFile "\..\..\build.txt"]
+        try return Integer(RegExReplace(FileRead(f), "\D"))
     return 0
 }
 
